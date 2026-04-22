@@ -5,17 +5,28 @@
 # Loads a pretrained NeuroVLA checkpoint and fine-tunes the SNN action head
 # with Reward-Modulated STDP (hybrid: alpha*backprop + beta*STDP).
 #
+# Default settings (RECOMMENDED — reproduces our reported results):
+#   per_device_batch_size : 16       (override with --batch-size)
+#   attn_implementation   : sdpa     (override with --attn)
+#
+# !!! IMPORTANT !!!
+# We strongly recommend keeping attn_implementation = sdpa.
+# In our experiments, swapping to flash_attention_2 led to unstable
+# training dynamics on NeuroVLA (numerical differences propagate through
+# the QFormer + SNN stack). Only change if you have a specific reason
+# and are prepared to re-tune.
+#
 # Default training steps:
 #   single suite (libero_goal / spatial / object / 10)  -> 30000 steps
 #   multi-suite  (libero_all)                           -> 50000 steps
 # Override with --steps <N>.
 #
 # Usage:
-#   bash run_stdp_finetune.sh                                          # libero_goal, 30k steps
+#   bash run_stdp_finetune.sh                                          # libero_goal, 30k, bs=16, sdpa
 #   bash run_stdp_finetune.sh --pretrained /path/to/ckpt               # override base ckpt
 #   bash run_stdp_finetune.sh --steps 10000                            # override step count
 #   bash run_stdp_finetune.sh --dataset libero_all                     # all 4 suites, 50k
-#   bash run_stdp_finetune.sh --pretrained CKPT --dataset libero_spatial
+#   bash run_stdp_finetune.sh --batch-size 8 --attn flash_attention_2
 #
 # Supported --dataset values:
 #   libero_goal      (default)  - 10 goal-directed tasks
@@ -36,6 +47,8 @@ cd "$PROJECT_ROOT"
 CONFIG_YAML="${CONFIG_YAML:-configs/finetune_config.yaml}"
 MODE="${MODE:-neuro_vla_stdp}"
 DATASET="libero_goal"
+BATCH_SIZE=16
+ATTN_IMPL="sdpa"
 PRETRAINED=""
 MAX_STEPS=""
 RUN_ID=""
@@ -49,6 +62,8 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --mode)       MODE="$2"; shift 2 ;;
         --dataset)    DATASET="$2"; shift 2 ;;
+        --batch-size|--bs) BATCH_SIZE="$2"; shift 2 ;;
+        --attn|--attn-impl) ATTN_IMPL="$2"; shift 2 ;;
         --pretrained|--ckpt) PRETRAINED="$2"; shift 2 ;;
         --steps|--max-steps) MAX_STEPS="$2"; shift 2 ;;
         --run-id)     RUN_ID="$2"; shift 2 ;;
@@ -69,6 +84,8 @@ fi
 # ---------- build OmegaConf overrides ----------
 OVERRIDES=(
     --datasets.vla_data.dataset_mix "$DATASET"
+    --datasets.vla_data.per_device_batch_size "$BATCH_SIZE"
+    --framework.qwenvl.attn_implementation "$ATTN_IMPL"
     --trainer.max_train_steps "$MAX_STEPS"
 )
 [ -n "$PRETRAINED" ] && OVERRIDES+=(--trainer.pretrained_checkpoint "$PRETRAINED")
@@ -78,6 +95,8 @@ echo "=============================================="
 echo "  NeuroVLA R-STDP Hybrid Fine-tuning"
 echo "  Mode:         $MODE"
 echo "  Dataset:      $DATASET"
+echo "  Batch size:   $BATCH_SIZE  (per device)"
+echo "  Attention:    $ATTN_IMPL"
 echo "  Max steps:    $MAX_STEPS"
 echo "  GPUs:         $NUM_GPUS"
 [ -n "$PRETRAINED" ] && echo "  Pretrained:   $PRETRAINED"
@@ -86,9 +105,9 @@ echo "=============================================="
 
 # ---------- resolve accelerate binary ----------
 ENV_ACC=""
-    for __p in /root/miniconda3/envs/${CONDA_ENV}/bin/accelerate /opt/conda/envs/${CONDA_ENV}/bin/accelerate; do
-        if [ -x "$__p" ]; then ENV_ACC="$__p"; break; fi
-    done
+for __p in /root/miniconda3/envs/${CONDA_ENV}/bin/accelerate /opt/conda/envs/${CONDA_ENV}/bin/accelerate; do
+    if [ -x "$__p" ]; then ENV_ACC="$__p"; break; fi
+done
 if [ -n "$ENV_ACC" ] && [ -x "$ENV_ACC" ]; then
     ACC="$ENV_ACC"
 elif command -v accelerate >/dev/null 2>&1; then
