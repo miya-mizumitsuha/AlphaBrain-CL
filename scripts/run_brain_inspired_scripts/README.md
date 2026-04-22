@@ -15,8 +15,8 @@ All paths are resolved relative to the project root, so scripts can be invoked f
 ### Step 1 — Pre-train NeuroVLA
 
 ```bash
-bash scripts/Run_brain_inspired_scripts/run_neurovla_pretrain.sh
-bash scripts/Run_brain_inspired_scripts/run_neurovla_pretrain.sh --steps 50000 --run-id my_pretrain
+bash scripts/run_brain_inspired_scripts/run_neurovla_pretrain.sh
+bash scripts/run_brain_inspired_scripts/run_neurovla_pretrain.sh --steps 50000 --run-id my_pretrain
 ```
 
 Checkpoints → `results/training/<run_id>/checkpoints/steps_XXXX/`.
@@ -24,7 +24,7 @@ Checkpoints → `results/training/<run_id>/checkpoints/steps_XXXX/`.
 ### Step 2 — Hybrid R-STDP Fine-tuning
 
 ```bash
-bash scripts/Run_brain_inspired_scripts/run_stdp_finetune.sh \
+bash scripts/run_brain_inspired_scripts/run_stdp_finetune.sh \
     --pretrained results/training/my_pretrain/checkpoints/steps_50000 \
     --steps 10000 \
     --run-id my_stdp_ft
@@ -34,16 +34,16 @@ bash scripts/Run_brain_inspired_scripts/run_stdp_finetune.sh \
 
 ```bash
 # baseline eval on libero_goal
-bash scripts/Run_brain_inspired_scripts/run_eval_libero.sh \
+bash scripts/run_brain_inspired_scripts/run_eval_libero.sh \
     --pretrained results/training/my_stdp_ft/checkpoints/steps_10000
 
 # all 4 suites, 50 trials per task
-bash scripts/Run_brain_inspired_scripts/run_eval_libero.sh \
+bash scripts/run_brain_inspired_scripts/run_eval_libero.sh \
     --pretrained results/training/my_stdp_ft/checkpoints/steps_10000 \
     --suite all --trials 50
 
 # with online STDP test-time adaptation
-bash scripts/Run_brain_inspired_scripts/run_eval_libero.sh \
+bash scripts/run_brain_inspired_scripts/run_eval_libero.sh \
     --pretrained results/training/my_stdp_ft/checkpoints/steps_10000 \
     --online-stdp
 ```
