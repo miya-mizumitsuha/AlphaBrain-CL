@@ -7,6 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docs](https://img.shields.io/badge/Docs-Online-green.svg)](https://alphabraingroup.github.io/AlphaBrain/)
 [![HuggingFace](https://img.shields.io/badge/%F0%9F%A4%97-Models-orange.svg)](https://huggingface.co/AlphaBrainGroup)
+[![WeChat](https://img.shields.io/badge/WeChat-Group-07C160.svg)](assets/wechat.jpg)
 
 <p align="center">
   <img src="assets/main_fig.png" width="100%" alt="AlphaBrain Architecture Overview"/>
@@ -129,13 +130,7 @@ We welcome contributions from the community — including new frameworks, benchm
 |:--------|:-----|
 | GitHub Issues | [Report bugs & request features](https://github.com/AlphaBrainGroup/AlphaBrain/issues) |
 | HuggingFace | [Models](https://huggingface.co/AlphaBrainGroup) |
-| WeChat Group | Scan the QR code below to join |
-
-<p align="center">
-  <img src="assets/wechat.jpg" width="240" alt="AlphaBrain WeChat Group"/>
-  <br/>
-  <sub>欢迎扫码加入微信群，一起讨论交流 · Scan to join our WeChat community</sub>
-</p>
+| WeChat Group | [Scan the QR code to join](assets/wechat.jpg) |
 
 ### Acknowledgments
 
