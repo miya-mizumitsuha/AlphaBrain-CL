@@ -154,10 +154,10 @@ AlphaBrain stands on the shoulders of an incredible open-source ecosystem. We ar
 ## 📝 Citation
 
 ```bibtex
-@software{AlphaBrain2025,
+@software{AlphaBrain2026,
   title     = {AlphaBrain: a Modular Open-Source Framework for Embodied Intelligence Research},
   author    = {AlphaBrain Community},
-  year      = {2025},
+  year      = {2026},
   url       = {https://github.com/AlphaBrainGroup/AlphaBrain},
   license   = {MIT},
   doi       = {}
