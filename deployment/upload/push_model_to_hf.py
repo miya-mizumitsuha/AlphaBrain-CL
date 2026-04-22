@@ -1,7 +1,7 @@
 from huggingface_hub import create_repo, HfApi
 
 # 1. create repository
-hf_name = "AlphaBrain/Qwen3-VL-OFT-LIBERO-4in1"
+hf_name = "StarVLA/Qwen3-VL-OFT-LIBERO-4in1"
 create_repo(hf_name, repo_type="model", exist_ok=True)
 
 # 2. initialize API

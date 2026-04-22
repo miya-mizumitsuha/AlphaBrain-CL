@@ -33,7 +33,7 @@ logger = initialize_overwatch(__name__)
 
 
 # PreTrainedModel, AutoModel, PretrainedConfig,  are so good, find sometime to study them
-# TODO: find sometime to merge yaml config with transformer config
+# TODO @JinhuiYE find sometime to merge yaml config with transformer config
 
 # ── VLM config key discovery ─────────────────────────────────────────────
 # All known (config_attr, model_attr) pairs for VLM interfaces.

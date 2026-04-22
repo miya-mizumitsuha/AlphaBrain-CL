@@ -1,4 +1,6 @@
 # Copyright 2025 NVIDIA Corp. and affiliates. All rights reserved.
+# Modified by [Junqiu YU/ Fudan University] in [2025]. 
+# Modification: [rm and add some connect adapter to match with starVLA, e.g., "rm "].
 # Action repeat is inspired by CogACT
 
 
@@ -217,7 +219,7 @@ class FlowmatchingActionHead(nn.Module):
     ):
         super().__init__()
         config = full_config.framework.action_model
-        self.hidden_size = config.hidden_size
+        self.hidden_size = config.hidden_size # @JinhuiYE
         self.full_config = full_config
         action_model_type = config.action_model_type
         action_model_cfg = DiTConfig[action_model_type]

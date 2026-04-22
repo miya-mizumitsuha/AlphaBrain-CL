@@ -1,5 +1,7 @@
-# Copyright 2025 VLA-Engine. All rights reserved.
+# Copyright 2025 starVLA community. All rights reserved.
 # Licensed under the MIT License, Version 1.0 (the "License");
+# Implemented by [Jinhui YE / HKUST University] in [2025]. 
+
 
 """
 Qwen-OFT Framework
@@ -14,8 +16,8 @@ Key Points:
 
 
 Note: How to add special tokens to Qwen2.5:
-  download our model checkpoint with special tokens added: https://huggingface.co/AlphaBrain/Qwen2.5-VL-3B-Instruct-Action
-  or /AlphaBrain/model/modules/vlm/tools/add_qwen_special_tokens/README.md （adpat a little code)
+  download our model checkpoint with special tokens added: https://huggingface.co/StarVLA/Qwen2.5-VL-3B-Instruct-Action
+  or /starVLA/model/modules/vlm/tools/add_qwen_special_tokens/README.md （adpat a little code)
   
 """
 from typing import List
@@ -24,7 +26,7 @@ from typing import List, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
+import numpy as np  
 from PIL import Image
 
 

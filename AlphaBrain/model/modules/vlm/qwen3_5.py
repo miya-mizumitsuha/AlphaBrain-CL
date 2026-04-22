@@ -1,5 +1,8 @@
-# Copyright 2025 VLA-Engine. All rights reserved.
+# Copyright 2025 starVLA community. All rights reserved.
 # Licensed under the MIT License, Version 1.0 (the "License"); 
+# Implemented by [Shijie LIAN/ Huazhong University of Science & Technology] in [2026].
+# Design and Merged by [Jinhui YE / HKUST University] in [2026].
+
 
 import torch
 from torch.nn.utils.rnn import pad_sequence
@@ -27,7 +30,7 @@ DEFAULT_IMAGE_TOKEN = "<image>"
 DEFAULT_VIDEO_TOKEN = "<video>"
 
 _ACTION_TOKEN_MIN = 248077 # how can we know this range? check how you add fast tokens into VLM
-_ACTION_TOKEN_MAX = 248077 + 2047 # here only for fast_tokenizer, see AlphaBrain/model/modules/vlm/tools/add_qwen_special_tokens/README.md
+_ACTION_TOKEN_MAX = 248077 + 2047 # here only for fast_tokenizer, see starVLA/model/modules/vlm/tools/add_qwen_special_tokens/README.md
 
 
 import torch.nn as nn
@@ -176,7 +179,7 @@ class _QWen3_5_VL_Interface(nn.Module):
         # if solutions, mask out the solution tokens in labels
         if solutions is not None: #  here only for fast_tokenizer now. 
             action_token_min = _ACTION_TOKEN_MIN # how can we know this range? --> we has other way for this, but is slower see qwenhelix branch
-            action_token_max = _ACTION_TOKEN_MAX # here only for fast_tokenizer, see AlphaBrain/model/modules/vlm/tools/add_qwen_special_tokens/README.md
+            action_token_max = _ACTION_TOKEN_MAX # here only for fast_tokenizer, see starVLA/model/modules/vlm/tools/add_qwen_special_tokens/README.md
             labels = batch_inputs['input_ids'].clone()
             # For each sequence in the batch, find the first occurrence of an action token.
             for i in range(labels.size(0)):
@@ -193,7 +196,7 @@ class _QWen3_5_VL_Interface(nn.Module):
                     seq[:] = IGNORE_INDEX
                     logger.warning(
                         "No action token found in sequence; please check action-tokenized tokenizer in "
-                        "AlphaBrain/model/modules/vlm/tools/add_qwen_special_tokens/README.md"
+                        "starVLA/model/modules/vlm/tools/add_qwen_special_tokens/README.md"
                     )
             
             labels[labels == self.processor.tokenizer.pad_token_id] = -100 ## mask out pad tokens as well
