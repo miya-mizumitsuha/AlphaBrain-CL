@@ -42,7 +42,7 @@
 </tr>
 <tr>
 <td width="50" align="center">📊</td>
-<td><b>Comprehensive Benchmark Suite</b> — Full adaptation to the latest embodied benchmarks with open-source support for <b>long-horizon task execution and memory</b>: LIBERO, LIBERO-plus, RoboCasa and more to come.</td>
+<td><b>Comprehensive Benchmark Suite</b> — Full adaptation to the latest embodied benchmarks with open-source support for <b>long-horizon task execution and memory</b>: LIBERO, LIBERO-plus, RoboCasa, RoboCasa365 and more to come.</td>
 </tr>
 </table>
 
