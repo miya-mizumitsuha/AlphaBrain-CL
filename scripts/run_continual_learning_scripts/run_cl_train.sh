@@ -41,15 +41,17 @@ Usage: bash $0 [options] [-- OmegaConf overrides]
 Common:
   --yaml PATH        CL config yaml. Default: ${YAML} (5d 🏆)
                      Available in configs/continual_learning/:
-                       qwengr00t_continual_libero.yaml       (5a/5b Full-param)
-                       qwengr00t_cl_lora_libero.yaml         (5d LoRA 🏆, default)
-                       qwengr00t_cl_lora_test.yaml           (smoke-sized LoRA)
-                       qwengr00t_cl_lora_libero_spatial.yaml (LoRA on LIBERO-Spatial)
-                       neurovla_continual_libero.yaml        (5e/5f Full-param)
-                       neurovla_cl_lora_libero.yaml          (5g/5h LoRA)
-                       llama_oft_continual_libero.yaml       (5i/5j Frozen LLM)
-                       llamaoft_cl_lora_libero.yaml          (5k/5l LoRA)
-                       paligemma_oft_continual_libero.yaml   (PaliGemmaOFT Full-param)
+                       qwengr00t_continual_libero.yaml       (5a/5b Full-param + ER)
+                       qwengr00t_cl_lora_libero.yaml         (5d LoRA + ER 🏆, default)
+                       qwengr00t_cl_lora_test.yaml           (smoke-sized LoRA + ER)
+                       qwengr00t_cl_lora_ewc_test.yaml       (smoke-sized LoRA + EWC)
+                       qwengr00t_cl_lora_mir_test.yaml       (smoke-sized LoRA + MIR)
+                       qwengr00t_cl_lora_libero_spatial.yaml (LoRA + ER on LIBERO-Spatial)
+                       neurovla_continual_libero.yaml        (5e/5f Full-param + ER)
+                       neurovla_cl_lora_libero.yaml          (5g/5h LoRA + ER)
+                       llama_oft_continual_libero.yaml       (5i/5j Frozen LLM + ER)
+                       llamaoft_cl_lora_libero.yaml          (5k/5l LoRA + ER)
+                       paligemma_oft_continual_libero.yaml   (PaliGemmaOFT Full-param + ER)
   --run-id ID        Override run_id in yaml (checkpoint dir name)
   --gpus SPEC        Either a count ("2") or a GPU-id list ("1,2,3"). A list
                      pins CUDA_VISIBLE_DEVICES to those IDs. (default: auto-detect)
@@ -141,7 +143,7 @@ export NCCL_ASYNC_ERROR_HANDLING="${NCCL_ASYNC_ERROR_HANDLING:-1}"
 export NCCL_TIMEOUT="${NCCL_TIMEOUT:-10000}"
 export NCCL_SOCKET_TIMEOUT_MS="${NCCL_SOCKET_TIMEOUT_MS:-360000}"
 
-# ---------- probe framework + base VLM (best-effort) ----------
+# ---------- probe framework + base VLM + CL method (best-effort) ----------
 FRAMEWORK=$(python -c "from omegaconf import OmegaConf; print(OmegaConf.load('$CONFIG').framework.name)" 2>/dev/null || echo '<unknown>')
 BASE_VLM_PATH=$(python -c "
 from omegaconf import OmegaConf
@@ -151,6 +153,23 @@ for k in ('qwenvl', 'llamavl', 'paligemma'):
         print(cfg[k].base_vlm); break
 " 2>/dev/null || echo '<unknown>')
 BASE_VLM_NAME=$(basename "$BASE_VLM_PATH" 2>/dev/null || echo "$BASE_VLM_PATH")
+
+# Detect active CL method: mirrors build_cl_algorithm's dispatch order
+#   replay.enabled=True               → use replay.method (ER / ...)
+#   algorithm.name=<name>             → use that name (EWC / DER / ...)
+#   neither                           → "none" (plain sequential baseline)
+CL_METHOD=$(python -c "
+from omegaconf import OmegaConf
+cl = OmegaConf.load('$CONFIG').get('continual_learning', None) or {}
+replay = cl.get('replay', None)
+if replay is not None and replay.get('enabled', False):
+    m = replay.get('method', 'experience_replay')
+    print({'experience_replay': 'ER'}.get(m, m.upper()))
+else:
+    algo = cl.get('algorithm', None)
+    name = algo.get('name', None) if algo is not None else None
+    print(str(name).upper() if name else 'none')
+" 2>/dev/null || echo '<unknown>')
 
 # ---------- assemble python args ----------
 PY_ARGS=(--config_yaml "$CONFIG")
@@ -194,6 +213,7 @@ _rule
 _kv "Config"     "${CH}${CONFIG#$REPO_ROOT/}${C0}"
 _kv "Framework"  "${CM}${FRAMEWORK}${C0}"
 _kv "Base VLM"   "${CM}${BASE_VLM_NAME}${C0}"
+_kv "CL Method"  "${CH}${CL_METHOD}${C0}"
 if [[ "$GPUS" == *,* ]]; then
     _kv "GPUs"   "${CG}${GPUS}${C0}  ${CD}(${NUM_PROCESSES} procs, port ${PORT})${C0}"
 else
