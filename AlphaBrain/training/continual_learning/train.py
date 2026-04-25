@@ -108,6 +108,7 @@ def build_task_dataloader(
         collate_fn=collate_fn,
         num_workers=4,
         shuffle=True,
+        persistent_workers=True,  # survive CL task transitions — avoids libav state corruption on worker re-fork
     )
     return dataloader, filtered_dataset
 

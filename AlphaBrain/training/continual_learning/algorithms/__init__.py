@@ -100,6 +100,7 @@ def build_cl_algorithm(cfg, seed: int = 42) -> Optional[CLAlgorithm]:
             ewc_lambda = algo_cfg.get("lambda", None)
             if ewc_lambda is None:
                 ewc_lambda = algo_cfg.get("ewc_lambda", 1.0e4)
+            excl = algo_cfg.get("exclude_name_substrings", None)
             return EWC(
                 ewc_lambda=ewc_lambda,
                 gamma=algo_cfg.get("gamma", 1.0),
@@ -108,6 +109,7 @@ def build_cl_algorithm(cfg, seed: int = 42) -> Optional[CLAlgorithm]:
                 fisher_clip=algo_cfg.get("fisher_clip", 1.0e4),
                 grad_clip_per_sample=algo_cfg.get("grad_clip_per_sample", 100.0),
                 fisher_save_dir=algo_cfg.get("fisher_save_dir", None),
+                exclude_name_substrings=list(excl) if excl is not None else None,
             )
         if key == "mir":
             return MIR(

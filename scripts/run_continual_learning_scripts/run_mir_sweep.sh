@@ -59,7 +59,7 @@ if [[ -z "${GPU_PAIRS:-}" ]]; then
     fi
 fi
 
-YAML="configs/continual_learning/qwengr00t_cl_lora_mir_libero.yaml"
+YAML="configs/continual_learning/qwengr00t_mir_lora_libero.yaml"
 
 mkdir -p "$LOG_DIR"
 

@@ -131,6 +131,7 @@ class EWC(CLAlgorithm):
         fisher_clip: Optional[float] = 1e4,
         grad_clip_per_sample: Optional[float] = 100.0,
         fisher_save_dir: Optional[str] = None,
+        exclude_name_substrings: Optional[List[str]] = None,
     ):
         self.ewc_lambda = float(ewc_lambda)
         self.gamma = float(gamma)
@@ -139,6 +140,9 @@ class EWC(CLAlgorithm):
         self.fisher_clip = None if fisher_clip is None else float(fisher_clip)
         self.grad_clip_per_sample = (
             None if grad_clip_per_sample is None else float(grad_clip_per_sample)
+        )
+        self.exclude_name_substrings = tuple(
+            s.lower() for s in (exclude_name_substrings or [])
         )
         # When set, after every task we dump the accumulated Fisher + θ*
         # tensors to `<fisher_save_dir>/fisher_task_<k>.pt` for offline
@@ -170,7 +174,10 @@ class EWC(CLAlgorithm):
         for name, param in base.named_parameters():
             if not param.requires_grad:
                 continue
-            if self.lora_only and "lora" not in name.lower():
+            lower = name.lower()
+            if self.lora_only and "lora" not in lower:
+                continue
+            if any(tok in lower for tok in self.exclude_name_substrings):
                 continue
             yield name, param
 

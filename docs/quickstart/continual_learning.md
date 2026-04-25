@@ -27,7 +27,7 @@ bash scripts/run_continual_learning_scripts/run_cl_train.sh --smoke
 
 # Switch architecture
 bash scripts/run_continual_learning_scripts/run_cl_train.sh \
-    --yaml configs/continual_learning/neurovla_continual_libero.yaml \
+    --yaml configs/continual_learning/neurovla_er_libero.yaml \
     --run-id my_5f
 ```
 
@@ -38,8 +38,8 @@ Checkpoints: `results/Checkpoints/<run_id>/`.
 ```bash
 # LoRA run — base-config required for adapter merge
 bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
-    --run-id alphabrain_cl_lora_libero_goal_v1 \
-    --base-config configs/continual_learning/qwengr00t_cl_lora_libero.yaml \
+    --run-id alphabrain_er_lora_libero_goal_v1 \
+    --base-config configs/continual_learning/qwengr00t_er_lora_libero.yaml \
     --gpus 0,1
 
 # Full-param run

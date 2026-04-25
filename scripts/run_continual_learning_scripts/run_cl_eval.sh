@@ -9,12 +9,12 @@
 # Usage (from repo root):
 #   # Full-param run (no LoRA merge needed)
 #   bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
-#       --run-id neurovla_cl_libero_goal_v1 --gpus 0
+#       --run-id neurovla_er_libero_goal_v1 --gpus 0
 #
 #   # LoRA run (supply --base-config)
 #   bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
-#       --run-id alphabrain_cl_lora_libero_goal_v1 \
-#       --base-config configs/continual_learning/qwengr00t_cl_lora_libero.yaml \
+#       --run-id alphabrain_er_lora_libero_goal_v1 \
+#       --base-config configs/continual_learning/qwengr00t_er_lora_libero.yaml \
 #       --gpus 0,1
 # =============================================================================
 set -euo pipefail
@@ -44,7 +44,7 @@ Required:
 
 Common:
   --base-config PATH    LoRA merge base config (required when ckpts contain *_lora_adapter)
-                        e.g. configs/continual_learning/qwengr00t_cl_lora_libero.yaml
+                        e.g. configs/continual_learning/qwengr00t_er_lora_libero.yaml
   --gpus LIST           Comma-separated GPU list (default "0"; "0,1" parallel, "1,2,3" etc.)
   --suite NAME          libero_goal|libero_spatial|libero_object|libero_10 (default libero_goal)
   --trials N            Trials per task (default 10)
@@ -56,23 +56,23 @@ Common:
 
 Typical modes (run-id → base-config mapping for LoRA runs):
   RUN_ID                                      | BASE_CONFIG
-  alphabrain_cl_lora_libero_goal_v1 (5d)      | configs/continual_learning/qwengr00t_cl_lora_libero.yaml
-  neurovla_cl_lora_er_5k (5h)                 | configs/continual_learning/neurovla_cl_lora_libero.yaml
-  llamaoft_cl_lora_er_libero_goal_5k (5l)     | configs/continual_learning/llamaoft_cl_lora_libero.yaml
-  neurovla_cl_libero_goal_v1 (5f, full-param) | (omit --base-config — no LoRA merge)
+  alphabrain_er_lora_libero_goal_v1 (5d)      | configs/continual_learning/qwengr00t_er_lora_libero.yaml
+  neurovla_er_lora_libero_goal_5k (5h)                 | configs/continual_learning/neurovla_er_lora_libero.yaml
+  llamaoft_er_lora_libero_goal_5k (5l)     | configs/continual_learning/llamaoft_er_lora_libero.yaml
+  neurovla_er_libero_goal_v1 (5f, full-param) | (omit --base-config — no LoRA merge)
 
 Examples:
   # 5d full matrix, 2 GPU
-  bash $0 --run-id alphabrain_cl_lora_libero_goal_v1 \\
-          --base-config configs/continual_learning/qwengr00t_cl_lora_libero.yaml \\
+  bash $0 --run-id alphabrain_er_lora_libero_goal_v1 \\
+          --base-config configs/continual_learning/qwengr00t_er_lora_libero.yaml \\
           --gpus 0,1
 
   # 5f (full-param) single GPU
-  bash $0 --run-id neurovla_cl_libero_goal_v1 --gpus 1
+  bash $0 --run-id neurovla_er_libero_goal_v1 --gpus 1
 
   # Custom trial count
-  bash $0 --run-id alphabrain_cl_lora_libero_goal_v1 \\
-          --base-config configs/continual_learning/qwengr00t_cl_lora_libero.yaml \\
+  bash $0 --run-id alphabrain_er_lora_libero_goal_v1 \\
+          --base-config configs/continual_learning/qwengr00t_er_lora_libero.yaml \\
           --gpus 0,1 --trials 50
 EOF
 }
@@ -121,9 +121,9 @@ list_available_runs() {
                 kind="LoRA  (need --base-config)"
                 # try to guess base config from run_id prefix
                 case "$run" in
-                    *qwen*|alphabrain*)         base_yaml="configs/continual_learning/qwengr00t_cl_lora_libero.yaml" ;;
-                    *neurovla*lora*|*neurovla_cl_lora*)          base_yaml="configs/continual_learning/neurovla_cl_lora_libero.yaml" ;;
-                    *llama*lora*|*llamaoft_cl_lora*)             base_yaml="configs/continual_learning/llamaoft_cl_lora_libero.yaml" ;;
+                    *qwen*|alphabrain*)         base_yaml="configs/continual_learning/qwengr00t_er_lora_libero.yaml" ;;
+                    *neurovla*lora*|*neurovla_cl_lora*)          base_yaml="configs/continual_learning/neurovla_er_lora_libero.yaml" ;;
+                    *llama*lora*|*llamaoft_cl_lora*)             base_yaml="configs/continual_learning/llamaoft_er_lora_libero.yaml" ;;
                     *) base_yaml="<pick matching configs/continual_learning/*.yaml>" ;;
                 esac
                 printf "  %-50s %-25s %2d ckpts   --base-config %s\n" "$run" "$kind" "$n_lora" "$base_yaml"

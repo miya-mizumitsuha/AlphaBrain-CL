@@ -194,14 +194,14 @@ A log-scale sweep on first contact with a new dataset is recommended:
 
 ```bash
 for lam in 1e3 1e4 1e5 1e6; do
-    bash run_cl_train.sh --yaml configs/continual_learning/qwengr00t_cl_lora_ewc_libero.yaml \
+    bash run_cl_train.sh --yaml configs/continual_learning/qwengr00t_ewc_lora_libero.yaml \
         --run-id ewc_lam${lam} --gpus 3,4 -- \
         --continual_learning.algorithm.lambda=${lam}
 done
 ```
 
 (A turnkey sweep script is provided — see
-[`run_ewc_lambda_sweep.sh`](run_ewc_lambda_sweep.sh).)
+[`run_ewc_sweep.sh`](run_ewc_sweep.sh).)
 
 YAML:
 
@@ -223,24 +223,26 @@ continual_learning:
 
 We benchmark each architecture on **LIBERO-Goal**, training sequentially
 on 10 tasks (50 demonstrations per task) and evaluating the final
-checkpoint against the full 10-task matrix with 10 rollouts per task.
-The reported **Average Success Rate (Avg SR)** is the mean over all
-10 tasks; **Negative Backward Transfer (NBT)** measures how much
-performance on earlier tasks drops as later tasks are learned (positive
-values indicate forgetting is mitigated relative to naive sequential
-fine-tuning).
+checkpoint against the full 10-task matrix.  Earlier rows below were
+measured with **10 rollouts per task** (early-stage screening); newer
+rows are at **50 rollouts per task** (more reliable, used for the
+production CL benchmark).  The reported **Average Success Rate (Avg SR)**
+is the mean over all 10 tasks; **Negative Backward Transfer (NBT)**
+measures how much performance on earlier tasks drops as later tasks are
+learned (positive values indicate forgetting is mitigated relative to
+naive sequential fine-tuning).
 
 <div align="center">
 
-| Architecture  | Method                   | Avg SR   | NBT    |
-|:--------------|:-------------------------|:--------:|:------:|
-| QwenGR00T     | Full-parameter + ER      | ~45 %    | +0.15  |
-| **QwenGR00T** | **LoRA (r=32) + ER**     | **~48 %**| **+0.15** |
-| NeuroVLA      | Full-parameter + ER      | ~40 %    | +0.40  |
-| NeuroVLA      | LoRA (r=32) + ER         | ~28 %    | +0.25  |
-| LlamaOFT      | LoRA (r=16) + ER         | ~17 %    | +0.50  |
-| QwenGR00T     | LoRA (r=32) + EWC        | _pending — λ sweep in progress_ |
-| QwenGR00T     | LoRA (r=32) + MIR        | _pending — planned sweep_        |
+| Architecture  | Method                   | Avg SR   | NBT    | Rollouts/task |
+|:--------------|:-------------------------|:--------:|:------:|:-------------:|
+| QwenGR00T     | Full-parameter + ER      | ~45 %    | +0.15  | 10 |
+| **QwenGR00T** | **LoRA (r=32) + ER**     | **~48 %**| **+0.15** | 10 |
+| NeuroVLA      | Full-parameter + ER      | ~40 %    | +0.40  | 10 |
+| NeuroVLA      | LoRA (r=32) + ER         | ~28 %    | +0.25  | 10 |
+| LlamaOFT      | LoRA (r=16) + ER         | ~17 %    | +0.50  | 10 |
+| **QwenGR00T** | **LoRA (r=32) + MIR**    | **~61 %**| **+0.20** | **50** |
+| QwenGR00T     | LoRA (r=32) + EWC        | _no convergent λ found in 1e3–1e10 sweep_ | — | 10 |
 
 </div>
 
@@ -252,6 +254,14 @@ across all architectures — catastrophic forgetting dominates.
 > state, attention implementation, and hardware. Reproduction results
 > higher or lower than the table are expected and welcome via issues
 > or pull requests.
+
+**MIR per-task breakdown** (10 000 steps/task × 10 tasks, default
+rehearsal_based config, 50 rollouts × 10 LIBERO-Goal tasks = 500
+episodes total):
+
+| T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8 | T9 | T10 | **Total** |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 84 | 94 | 62 | 4 | 86 | 50 | 44 | 86 | 86 | 16 | **61.2 %** |
 
 ---
 
@@ -276,21 +286,21 @@ bash scripts/run_continual_learning_scripts/run_cl_train.sh --smoke
 # ER  (default, already exercised by `run_cl_train.sh --smoke`)
 # EWC
 bash scripts/run_continual_learning_scripts/run_cl_train.sh --smoke \
-    --yaml configs/continual_learning/qwengr00t_cl_lora_ewc_test.yaml
+    --yaml configs/continual_learning/qwengr00t_ewc_lora_test.yaml
 # MIR
 bash scripts/run_continual_learning_scripts/run_cl_train.sh --smoke \
-    --yaml configs/continual_learning/qwengr00t_cl_lora_mir_test.yaml
+    --yaml configs/continual_learning/qwengr00t_mir_lora_test.yaml
 
 # --- Full-scale training with explicit GPUs -----------------------------
 
 # QwenGR00T LoRA + EWC production config on GPU 3,4
 bash scripts/run_continual_learning_scripts/run_cl_train.sh \
-    --yaml configs/continual_learning/qwengr00t_cl_lora_ewc_libero.yaml \
+    --yaml configs/continual_learning/qwengr00t_ewc_lora_libero.yaml \
     --gpus 3,4
 
 # Switch architecture — NeuroVLA full-parameter + ER
 bash scripts/run_continual_learning_scripts/run_cl_train.sh \
-    --yaml configs/continual_learning/neurovla_continual_libero.yaml \
+    --yaml configs/continual_learning/neurovla_er_libero.yaml \
     --run-id neurovla_cl_run_v1
 
 # Pin specific GPUs + custom step budget
@@ -299,14 +309,14 @@ bash scripts/run_continual_learning_scripts/run_cl_train.sh --gpus 1,2 -- \
 
 # Override EWC hyperparameters at launch
 bash scripts/run_continual_learning_scripts/run_cl_train.sh \
-    --yaml configs/continual_learning/qwengr00t_cl_lora_ewc_test.yaml -- \
+    --yaml configs/continual_learning/qwengr00t_ewc_lora_test.yaml -- \
     --continual_learning.algorithm.lambda=5.0e4 \
     --continual_learning.algorithm.fisher_num_batches=50
 
 # --- EWC λ sweep — four parallel pairs -----------------------------------
 
 PARALLEL=1 STEPS_PER_TASK=2000 GPUS_A=3,4 GPUS_B=5,6 \
-    bash scripts/run_continual_learning_scripts/run_ewc_lambda_sweep.sh
+    bash scripts/run_continual_learning_scripts/run_ewc_sweep.sh
 ```
 
 Checkpoints are written to `results/Checkpoints/<run_id>/checkpoints/`:
@@ -328,18 +338,18 @@ cd /path/to/AlphaBrain-CL
 
 # Full 10×10 matrix — LoRA run (2 GPUs parallel)
 bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
-    --run-id qwengr00t_cl_lora_libero_goal_v1 \
-    --base-config configs/continual_learning/qwengr00t_cl_lora_libero.yaml \
+    --run-id qwengr00t_er_lora_libero_goal_v1 \
+    --base-config configs/continual_learning/qwengr00t_er_lora_libero.yaml \
     --gpus 0,1
 
 # Full-parameter run (no --base-config needed)
 bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
-    --run-id neurovla_cl_libero_goal_v1 --gpus 1
+    --run-id neurovla_er_libero_goal_v1 --gpus 1
 
 # Quick final-checkpoint sanity check (single GPU)
 bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
-    --run-id qwengr00t_cl_lora_libero_goal_v1 \
-    --base-config configs/continual_learning/qwengr00t_cl_lora_libero.yaml \
+    --run-id qwengr00t_er_lora_libero_goal_v1 \
+    --base-config configs/continual_learning/qwengr00t_er_lora_libero.yaml \
     --gpus 0 --last-only
 ```
 
@@ -360,7 +370,7 @@ echo "ROBOCASA365_DATA_DIR=/path/to/robocasa/v1.0" >> .env
 
 # 2. Launch — 5 composite Robocasa365 tasks (QwenGR00T + LoRA + ER)
 bash scripts/run_continual_learning_scripts/run_cl_train.sh \
-    --yaml configs/continual_learning/qwengr00t_cl_lora_robocasa.yaml
+    --yaml configs/continual_learning/qwengr00t_er_lora_robocasa_atomic10.yaml
 ```
 
 **Defining a custom stream** — edit the yaml directly, no Python
@@ -425,7 +435,7 @@ Optional (only for non-LIBERO streams):
 
 | Flag              | Description                                                                  | Default                                                    |
 |:------------------|:-----------------------------------------------------------------------------|:-----------------------------------------------------------|
-| `--yaml PATH`     | CL config yaml (relative or absolute).                                       | `configs/continual_learning/qwengr00t_cl_lora_libero.yaml` |
+| `--yaml PATH`     | CL config yaml (relative or absolute).                                       | `configs/continual_learning/qwengr00t_er_lora_libero.yaml` |
 | `--run-id ID`     | Override the yaml's `run_id` (controls the checkpoint directory name).       | from yaml                                                  |
 | `--gpus SPEC`     | Either a count (`"2"`) or a comma-separated id list (`"1,2,3"`). A list pins `CUDA_VISIBLE_DEVICES`. | auto-detect                          |
 | `--port N`        | `accelerate` main process port.                                              | auto-select a free port                                    |
@@ -449,19 +459,19 @@ run:
 
 | Yaml                                                | Architecture   | Model variant       | CL method |
 |:----------------------------------------------------|:---------------|:--------------------|:----------|
-| `qwengr00t_continual_libero.yaml`                   | QwenGR00T      | Full-parameter      | ER        |
-| **`qwengr00t_cl_lora_libero.yaml`** (default)       | QwenGR00T      | **LoRA (r=32)**     | **ER**    |
-| `qwengr00t_cl_lora_test.yaml`                       | QwenGR00T      | LoRA, smoke-sized   | ER        |
-| `qwengr00t_cl_lora_ewc_libero.yaml`                 | QwenGR00T      | LoRA (r=32)         | EWC       |
-| `qwengr00t_cl_lora_ewc_test.yaml`                   | QwenGR00T      | LoRA, smoke-sized   | EWC       |
-| `qwengr00t_cl_lora_mir_test.yaml`                   | QwenGR00T      | LoRA, smoke-sized   | MIR       |
-| `qwengr00t_cl_lora_libero_spatial.yaml`             | QwenGR00T      | LoRA, LIBERO-Spatial| ER        |
-| `qwengr00t_cl_lora_robocasa.yaml`                   | QwenGR00T      | LoRA, Robocasa365 (5 composite tasks) | ER |
-| `neurovla_continual_libero.yaml`                    | NeuroVLA       | Full-parameter      | ER        |
-| `neurovla_cl_lora_libero.yaml`                      | NeuroVLA       | LoRA                | ER        |
-| `llama_oft_continual_libero.yaml`                   | LlamaOFT       | Frozen LLM          | ER        |
-| `llamaoft_cl_lora_libero.yaml`                      | LlamaOFT       | LoRA (r=16)         | ER        |
-| `paligemma_oft_continual_libero.yaml`               | PaliGemmaOFT   | Full-parameter      | ER        |
+| `qwengr00t_er_libero.yaml`                   | QwenGR00T      | Full-parameter      | ER        |
+| **`qwengr00t_er_lora_libero.yaml`** (default)       | QwenGR00T      | **LoRA (r=32)**     | **ER**    |
+| `qwengr00t_er_lora_test.yaml`                       | QwenGR00T      | LoRA, smoke-sized   | ER        |
+| `qwengr00t_ewc_lora_libero.yaml`                 | QwenGR00T      | LoRA (r=32)         | EWC       |
+| `qwengr00t_ewc_lora_test.yaml`                   | QwenGR00T      | LoRA, smoke-sized   | EWC       |
+| `qwengr00t_mir_lora_test.yaml`                   | QwenGR00T      | LoRA, smoke-sized   | MIR       |
+| `qwengr00t_er_lora_libero_spatial.yaml`             | QwenGR00T      | LoRA, LIBERO-Spatial| ER        |
+| `qwengr00t_er_lora_robocasa_atomic10.yaml`                   | QwenGR00T      | LoRA, Robocasa365 (5 composite tasks) | ER |
+| `neurovla_er_libero.yaml`                    | NeuroVLA       | Full-parameter      | ER        |
+| `neurovla_er_lora_libero.yaml`                      | NeuroVLA       | LoRA                | ER        |
+| `llama_oft_er_libero.yaml`                   | LlamaOFT       | Frozen LLM          | ER        |
+| `llamaoft_er_lora_libero.yaml`                      | LlamaOFT       | LoRA (r=16)         | ER        |
+| `paligemma_oft_er_libero.yaml`               | PaliGemmaOFT   | Full-parameter      | ER        |
 
 **CL method selection via YAML.**  The `continual_learning:` block supports
 two schemas — **pick one per run**.  If both are present, the `replay`
@@ -502,7 +512,7 @@ The evaluator automatically:
 3. Parallelises across `--gpus` — each worker owns a dedicated policy server + port.
 4. Emits per-checkpoint `eval.log` + `server.log` under `results/eval_cl/<run_id>/<checkpoint_name>/`.
 
-### `run_ewc_lambda_sweep.sh`
+### `run_ewc_sweep.sh`
 
 Thin wrapper that loops `run_cl_train.sh` over a list of EWC λ values.
 Designed for the "first-contact" hyperparameter sweep on a new dataset.
@@ -521,7 +531,7 @@ Example — 4 λ values, two parallel workers, 2000 steps/task (~7 h wall clock)
 
 ```bash
 PARALLEL=1 STEPS_PER_TASK=2000 GPUS_A=3,4 GPUS_B=5,6 \
-    bash scripts/run_continual_learning_scripts/run_ewc_lambda_sweep.sh
+    bash scripts/run_continual_learning_scripts/run_ewc_sweep.sh
 ```
 
 ---
