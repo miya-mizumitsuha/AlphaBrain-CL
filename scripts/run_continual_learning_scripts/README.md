@@ -234,15 +234,20 @@ naive sequential fine-tuning).
 
 <div align="center">
 
-| Architecture  | Method                   | Avg SR   | NBT    | Rollouts/task |
-|:--------------|:-------------------------|:--------:|:------:|:-------------:|
-| QwenGR00T     | Full-parameter + ER      | ~45 %    | +0.15  | 10 |
-| **QwenGR00T** | **LoRA (r=32) + ER**     | **~48 %**| **+0.15** | 10 |
-| NeuroVLA      | Full-parameter + ER      | ~40 %    | +0.40  | 10 |
-| NeuroVLA      | LoRA (r=32) + ER         | ~28 %    | +0.25  | 10 |
-| LlamaOFT      | LoRA (r=16) + ER         | ~17 %    | +0.50  | 10 |
-| **QwenGR00T** | **LoRA (r=32) + MIR**    | **~61 %**| **+0.20** | **50** |
-| QwenGR00T     | LoRA (r=32) + EWC        | _no convergent λ found in 1e3–1e10 sweep_ | — | 10 |
+| Architecture  | Method                                          | Avg SR    | NBT       | Rollouts/task |
+|:--------------|:------------------------------------------------|:---------:|:---------:|:-------------:|
+| QwenGR00T     | Full-parameter + ER                             | ~45 %     | +0.15     | 10 |
+| **QwenGR00T** | **Full-parameter + ER**                         | **51.6 %**| +0.05     | **50** |
+| **QwenGR00T** | **LoRA (r=32) + ER**                            | **~48 %** | **+0.15** | 10 |
+| NeuroVLA      | Full-parameter + ER                             | ~40 %     | +0.40     | 10 |
+| NeuroVLA      | LoRA (r=32) + ER                                | ~28 %     | +0.25     | 10 |
+| LlamaOFT      | LoRA (r=16) + ER                                | ~17 %     | +0.50     | 10 |
+| QwenGR00T     | LoRA (r=32) + MIR (default knobs, ER policy)    | 54.0 %    | +0.18     | **50** |
+| QwenGR00T     | LoRA (r=32) + MIR (refresh=500, ER policy)      | 54.0 %    | +0.16     | **50** |
+| QwenGR00T     | LoRA (r=32) + MIR (default knobs, old policy)   | 61.2 %    | +0.20     | **50** |
+| QwenGR00T     | LoRA (r=32) + MIR (widepool, ER policy)         | 70.0 %    | +0.30     | **50** |
+| **QwenGR00T** | **LoRA (r=32) + MIR (refresh=50, ER policy)**   | **76.0 %**| **+0.36** | **50** |
+| QwenGR00T     | LoRA (r=32) + EWC                               | _no convergent λ found in 1e3–1e10 sweep_ | — | 10 |
 
 </div>
 
@@ -255,13 +260,70 @@ across all architectures — catastrophic forgetting dominates.
 > higher or lower than the table are expected and welcome via issues
 > or pull requests.
 
-**MIR per-task breakdown** (10 000 steps/task × 10 tasks, default
-rehearsal_based config, 50 rollouts × 10 LIBERO-Goal tasks = 500
-episodes total):
+**Per-task breakdown @ 50 rollouts/task** (QwenGR00T, 10 000 steps/task
+× 10 tasks, 500 episodes/suite). Eval order is the LIBERO-Goal default
+(eval-#1 = the most-recently-trained task; eval-#10 = the
+first-trained task):
 
-| T1 | T2 | T3 | T4 | T5 | T6 | T7 | T8 | T9 | T10 | **Total** |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 84 | 94 | 62 | 4 | 86 | 50 | 44 | 86 | 86 | 16 | **61.2 %** |
+| #  | Task name                                       | Full-param ER | MIR default | MIR aligned | MIR refresh=500 | MIR widepool | **MIR refresh=50** |
+|:--:|:------------------------------------------------|:-------------:|:-----------:|:-----------:|:---------------:|:------------:|:------------------:|
+| 1  | open the middle drawer of the cabinet           | 100           | 84          | 86          | 92              | 78           | 84                 |
+| 2  | put the bowl on the stove                       | **0**         | 94          | 82          | 94              | 96           | **100**            |
+| 3  | put the wine bottle on top of the cabinet       | **0**         | 62          | 68          | 18              | 70           | 88                 |
+| 4  | open the top drawer and put the bowl inside     | 72            | 4           | 20          | **0**           | 32           | 30                 |
+| 5  | put the bowl on top of the cabinet              | 78            | 86          | 74          | 96              | 90           | 94                 |
+| 6  | push the plate to the front of the stove        | **0**         | 50          | 48          | 44              | 82           | 86                 |
+| 7  | put the cream cheese in the bowl                | 72            | 44          | 40          | 24              | 52           | 56                 |
+| 8  | turn on the stove                               | **0**         | 86          | 52          | 94              | 90           | 94                 |
+| 9  | put the bowl on the plate                       | 96            | 86          | 60          | 76              | 86           | 86                 |
+| 10 | put the wine bottle on the rack                 | 98            | 16          | 8           | **0**           | 22           | 44                 |
+| —  | **Total**                                       | **51.6**      | **61.2**    | **54.0**    | **54.0**        | **70.0**     | **76.0**           |
+| —  | tasks ≥ 20 %                                    | 6/10          | 9/10        | **10/10**   | 8/10            | **10/10**    | **10/10**          |
+
+**Three observations from this matrix.**
+
+1. **Fresher MIR cache is the dominant lever.**  Lowering
+   `mir_refresh_interval` from the default 200 to 50 (MIR refresh=50,
+   **76.0 %**) gives the largest single-knob win — more than +20 pp over
+   the aligned baseline (54.0 %).  Wider candidate pool also helps
+   substantially (widepool 70.0 %), but is dominated by refresh
+   frequency.  refresh=500 (sparser) goes the other way and produces
+   two hard-zero tasks (T4, T10) — MIR's cache goes stale across long
+   gaps and the routing becomes random replay.
+
+2. **ER-style replay policy alone hurts MIR.**  Switching from
+   `buffer=500, ratio=0.3, balanced=false` (MIR default, 61.2 %) to
+   `buffer=1000, ratio=0.5, balanced=true` (MIR aligned, 54.0 %) drops
+   Total by 7.2 pp.  The higher replay ratio dilutes MIR's signal —
+   more random replay batches drown the small cache of MIR-selected
+   interfered samples.  Tuning the MIR knobs (refresh=50 or widepool)
+   reverses this and yields the best Totals in the matrix.
+
+3. **ER and MIR fail differently.**  Full-param ER produces a
+   *bipolar* distribution (4 tasks at hard 0 %, 6 tasks at 70-100 %);
+   all five MIR variants *uniformize* the distribution.  The degree of
+   uniformization correlates with Total — refresh=50 hits 100 % on
+   task 2 ("put the bowl on the stove") *and* keeps every task in the
+   matrix above 30 % simultaneously, which no other method achieves.
+
+### Recommended LIBERO-Goal recipe
+
+If you're picking one config to start from, use **MIR with
+`mir_refresh_interval=50`** on top of the ER replay policy
+(`buffer=1000, ratio=0.5, balanced=true, lora_only=true`):
+
+```bash
+bash scripts/run_continual_learning_scripts/run_cl_train.sh \
+    --yaml configs/continual_learning/qwengr00t_mir_lora_libero.yaml \
+    --gpus 0,1,2,3 -- \
+    --continual_learning.algorithm.buffer_size_per_task=1000 \
+    --continual_learning.algorithm.replay_batch_ratio=0.5 \
+    --continual_learning.algorithm.balanced_sampling=true \
+    --continual_learning.algorithm.mir_refresh_interval=50
+```
+
+Expect ~17 h on 4× A800 80 GB; final Avg SR around 76 % at 50
+rollouts/task on LIBERO-Goal.
 
 ---
 

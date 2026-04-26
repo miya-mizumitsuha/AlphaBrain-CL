@@ -102,13 +102,18 @@ def build_task_dataloader(
         episode_task_map=episode_task_map,
         task_stream_mode=task_stream_mode,
     )
+    # num_workers configurable per-yaml so heavy 3-camera embodiments (Robocasa)
+    # can fall back to 0 (synchronous main-thread reads) when libav workers
+    # accumulate state over long runs and segfault at task transitions.
+    num_workers = int(cfg.datasets.vla_data.get("num_workers", 4))
     dataloader = DataLoader(
         filtered_dataset,
         batch_size=cfg.datasets.vla_data.per_device_batch_size,
         collate_fn=collate_fn,
-        num_workers=4,
+        num_workers=num_workers,
         shuffle=True,
-        persistent_workers=True,  # survive CL task transitions — avoids libav state corruption on worker re-fork
+        # persistent_workers requires num_workers > 0 (PyTorch raises otherwise).
+        persistent_workers=num_workers > 0,
     )
     return dataloader, filtered_dataset
 
