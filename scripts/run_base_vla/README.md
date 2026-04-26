@@ -32,11 +32,10 @@ Unified training & evaluation pipeline for the three base VLA frameworks in Alph
 | Model | VLM | Action Head | Steps | Finetune Format | EMA | BS | Acc | LIBERO-Goal | LIBERO-Spatial | LIBERO-Object | LIBERO-10 (Long) |
 |:------|:----|:------------|:------|:----------------|:----|:---|:----|:------------|:---------------|:--------------|:-----------------|
 | OpenPi Pi05 (official) | PaliGemma 3B | Flow Matching 300M | 30k | multi-task | full ema | 256 | - | **98.0** | **98.8** | **98.2** | **92.4** |
-| AlphaBrain+PaliGemmaPi05 (pretrained) | PaliGemma 3B | Flow Matching 300M | 22k | multi-task | first 7k w/ ema | 32 | 2 | 94.7 | 93.3 | 98.0 | 92.0 |
+| AlphaBrain+PaliGemmaPi05 (pretrained) | PaliGemma 3B | Flow Matching 300M | 22k | multi-task | None | 32 | 2 | 97.8 | 99.0 | 98.0 | 93.2 |
 | AlphaBrain+PaliGemmaPi05 (no finetune) | PaliGemma 3B | Flow Matching 300M | - | - | - | - | - | 0 | 0 | 0 | 0 |
-| AlphaBrain+LlamaPi0 | Llama 11B | MLP | 30k | multi-task | - | 256 | 4 | TBD | TBD | TBD | TBD |
-| LlamaOFT | Llama 11B | MLP | 30k | single-task | - | 128 | 1 | 92.0 | 79.0 | 94.0 | 44.0 |
-| PaliGemmaOFT | PaliGemma 3B | MLP | 30k | single-task | - | 128 | 1 | 88.0 | 77.0 | 96.0 | 43.0 |
+| LlamaOFT | Llama 11B | MLP | 30k | multi-task | - | 128 | 1 | 92.4 | 94.0 | 99.4 | 88.6 |
+| PaliGemmaOFT | PaliGemma 3B | MLP | 30k | single-task | - | 128 | 1 | 95.8% | 95.4 | 99.0 | 86.6 |
 
 ---
 
