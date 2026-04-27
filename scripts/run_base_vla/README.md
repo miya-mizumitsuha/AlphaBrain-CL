@@ -52,11 +52,19 @@ LIBERO_DATA_ROOT=/path/to/IPEC-COMMUNITY
 # Required: LIBERO source code directory (for eval client)
 LIBERO_HOME=/path/to/LIBERO
 
+# Required: parent dir for all pretrained backbones.
+# Sub-dirs use HF repo basenames: paligemma-3b-pt-224/,
+# Llama-3.2-11B-Vision-Instruct/, pi05_base/, ...
+# Missing dirs are auto-downloaded by scripts/run_finetune.sh on first run.
+PRETRAINED_MODELS_DIR=/path/to/pretrained_models
+
 # Required for PaliGemmaPi05 models: PaliGemma tokenizer path
 # Must use the original Gemma tokenizer (vocab_size=256000)
 # Do NOT use the PaliGemma VLM checkpoint tokenizer (vocab_size=257152)
 PALIGEMMA_TOKENIZER_PATH=/path/to/paligemma_tokenizer
 ```
+
+> **Auto-download**: On the first training run for each mode, missing weights under `PRETRAINED_MODELS_DIR` are pulled from HuggingFace via `scripts/download_pretrained.py`. Gated repos (PaliGemma, Llama) need `HF_TOKEN` in the environment. To disable, set `ALPHABRAIN_DISABLE_AUTO_DOWNLOAD=1`.
 
 > **⚠️ Flash Attention**: If `flash_attn` is not installed (e.g., on NVIDIA B200/Blackwell GPUs), the code automatically falls back to SDPA. No manual config changes needed.
 
@@ -190,7 +198,7 @@ All other hyper-parameters (LR, batch size, DeepSpeed config, dataset paths…) 
 | Component | Path |
 |:----------|:-----|
 | PaliGemmaOFT framework | `AlphaBrain/model/framework/PaliGemmaOFT.py` |
-| PaliGemmaPi05 framework | `AlphaBrain/model/framework/PaliGemmaPi05.py` |
+| PaliGemmaPi framework | `AlphaBrain/model/framework/PaliGemmaPi.py` |
 | LlamaOFT framework | `AlphaBrain/model/framework/LlamaOFT.py` |
 | Config (mode router) | `configs/finetune_config.yaml` |
 | Model architecture defaults | `configs/models/paligemma_oft.yaml`, `configs/models/paligemma_pi0.yaml`, `configs/models/llama_oft.yaml` |

@@ -68,6 +68,14 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
+# 预训练权重根目录必填（参与训练/评估的所有 ${PRETRAINED_MODELS_DIR}/<name> 路径都依赖它）
+: "${PRETRAINED_MODELS_DIR:?need PRETRAINED_MODELS_DIR in .env (parent dir for paligemma-3b-pt-224, Llama-3.2-11B-Vision-Instruct, pi05_base, etc.)}"
+
+# 缺失的预训练权重自动从 HuggingFace 拉取（设 ALPHABRAIN_DISABLE_AUTO_DOWNLOAD=1 关闭）
+if [ -n "$MODE" ]; then
+    python scripts/download_pretrained.py --config "$CONFIG_FILE" --mode "$MODE" || exit 1
+fi
+
 # 使用 Python 脚本解析配置文件并加载到当前 shell 环境
 info "Loading configuration from ${C_YELLOW}${CONFIG_FILE}${C_RESET}  mode: ${C_BOLD}${MODE:-<default>}${C_RESET}"
 eval "$(python scripts/parse_config.py --config "$CONFIG_FILE" ${MODE:+--mode "$MODE"})"

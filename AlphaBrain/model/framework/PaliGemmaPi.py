@@ -1,18 +1,21 @@
 # Copyright 2025 VLA-Engine. All rights reserved.
-# Pi0/Pi0.5 OFT Framework — Flow Matching VLA with swappable VLM backbone
+# Pi0 / Pi0.5 Flow Matching VLA with swappable VLM backbone
 
 """
-PaliGemmaOFT Framework
+PaliGemmaPi Framework
 
-Integrates the π₀/π₀.₅ flow matching architecture into VLA-Engine.
-Key innovation: the VLM backbone is swappable — you can use PaliGemma (original),
-Qwen2.5-VL, Llama 3.2 Vision, or any future VLM backend.
+Unified π₀ / π₀.₅ flow matching framework. The same class supports both
+algorithm modes (`framework.pi05: true|false`) and multiple VLM backbones
+(PaliGemma / Llama / Qwen). Registered under four legacy names for
+config compatibility:
+
+    PaliGemmaPi0  PaliGemmaPi05  LlamaPi0  LlamaPi05
 
 Architecture:
   VLM (any) → prefix embedding → [KV cache] → Action Expert (Gemma) + Flow Matching → actions
 
 Components:
-  - VLM interface: reuses AlphaBrain's existing get_vlm_model() factory
+  - VLM interface: reuses VLAE's existing get_vlm_model() factory
   - Action Expert: independent Gemma transformer (from openpi)
   - Flow Matching Head: multi-step denoising action generation
 
@@ -39,16 +42,18 @@ IGNORE_INDEX = -100
 
 
 @FRAMEWORK_REGISTRY.register("PaliGemmaPi0")
-@FRAMEWORK_REGISTRY.register("LlamaPi05")
+@FRAMEWORK_REGISTRY.register("PaliGemmaPi05")
 @FRAMEWORK_REGISTRY.register("LlamaPi0")
-class PaliGemma_OFT(BaseFramework):
+@FRAMEWORK_REGISTRY.register("LlamaPi05")
+class PaliGemmaPi(BaseFramework):
     """
-    Pi0/Pi0.5 framework with swappable VLM backbone.
-    
+    Unified Pi0 / Pi0.5 framework with swappable VLM backbone.
+
     Config structure:
         framework:
-          name: PaliGemmaOFT
-          pi05: true                    # true for π₀.₅, false for π₀
+          name: PaliGemmaPi05            # or PaliGemmaPi0 / LlamaPi0 / LlamaPi05
+          pi05: true                     # true for π₀.₅, false for π₀
+          gripper_remap: false           # optional; defaults to true when name=="PaliGemmaPi05"
           paligemma:                     # or qwenvl/llamavl — uses get_vlm_model()
             base_vlm: google/paligemma-3b-pt-224
           action_expert:
@@ -59,37 +64,38 @@ class PaliGemma_OFT(BaseFramework):
             action_dim: 7
             action_horizon: 50
             num_inference_steps: 10
+            action_mask: [true, true, ..., false]   # optional, loss only on valid dims
     """
 
     def __init__(self, config: Optional[dict] = None, **kwargs) -> None:
         super().__init__()
         self.config = config
-        
+
         pi05 = getattr(config.framework, 'pi05', True)
         self.pi05 = pi05
-        
+
         # ── VLM backbone (swappable) ──
         # Determine which VLM to use based on config
         vlm_type = self._detect_vlm_type(config)
-        
+
         if vlm_type == "paligemma":
             from AlphaBrain.model.modules.vlm.paligemma import _PaliGemma_VL_Interface
             self.vlm_interface = _PaliGemma_VL_Interface(config=config)
         else:
             # Use existing VLM factory for Qwen/Llama/Florence etc.
             self.vlm_interface = get_vlm_model(config=config)
-        
+
         # ── Action Expert + Flow Matching Head ──
         expert_cfg = config.framework.action_expert
         action_cfg = config.framework.action_model
-        
+
         # Determine expert type based on framework name and config
         expert_type = "gemma"  # default
         if config.framework.name == "LlamaPi0":
             expert_type = "llama"
         elif hasattr(expert_cfg, 'type'):
             expert_type = expert_cfg.type
-        
+
         self._tokenizer = None
         self.flow_matching_head = Pi0FlowMatchingHead(
             action_dim=action_cfg.action_dim,
@@ -108,7 +114,7 @@ class PaliGemma_OFT(BaseFramework):
             expert_type=expert_type,
             state_dim=getattr(action_cfg, 'state_dim', None),
         )
-        
+
         # ── Prefix projection (for VLM hidden_size != action_expert_width) ──
         expert_width = getattr(expert_cfg, 'width', 1024)
         vlm_hidden_size = self._get_vlm_hidden_size()
@@ -119,7 +125,7 @@ class PaliGemma_OFT(BaseFramework):
             logger.info(f"[prefix_proj] Added projection: VLM hidden={vlm_hidden_size} → expert_width={expert_width}")
         else:
             self.prefix_proj = None
-        
+
         # ── Action dimension settings ──
         self.action_dim = action_cfg.action_dim
         self.action_horizon = action_cfg.action_horizon
@@ -132,9 +138,16 @@ class PaliGemma_OFT(BaseFramework):
         if vlm_lm is not None and hasattr(vlm_lm, 'rotary_emb'):
             self.flow_matching_head._vlm_rotary_emb = vlm_lm.rotary_emb
 
+        # Gripper remap: map dim-6 from [0,1] to [+1,-1] post-unnormalization.
+        # Required for LIBERO eval client (-gripper + binarize). Defaults true
+        # when registered as "PaliGemmaPi05" to preserve historical behavior.
+        gripper_default = (config.framework.name == "PaliGemmaPi05")
+        self.gripper_remap = bool(getattr(config.framework, 'gripper_remap', gripper_default))
+
         logger.info(
-            f"PaliGemmaOFT initialized: pi05={pi05}, vlm={vlm_type}, "
-            f"action_dim={self.action_dim}, horizon={self.action_horizon}"
+            f"PaliGemmaPi initialized: name={config.framework.name}, pi05={pi05}, "
+            f"vlm={vlm_type}, action_dim={self.action_dim}, horizon={self.action_horizon}, "
+            f"gripper_remap={self.gripper_remap}"
         )
 
         # Enable gradient checkpointing on action expert only.
@@ -185,6 +198,17 @@ class PaliGemma_OFT(BaseFramework):
         else:
             logger.info("[norm] No action normalization (raw actions)")
 
+        # ── Action dimension mask (for action_dim=32 with only 7 valid dims) ──
+        # Read from config: framework.action_model.action_mask
+        # e.g. [true, true, true, true, true, true, true, false, ..., false]
+        action_mask_cfg = getattr(config.framework.action_model, 'action_mask', None)
+        if action_mask_cfg is not None:
+            self._action_dim_mask = torch.tensor(list(action_mask_cfg), dtype=torch.bool)
+            n_valid = self._action_dim_mask.sum().item()
+            logger.info(f"[action_mask] {n_valid}/{len(action_mask_cfg)} valid action dims (loss computed on valid dims only)")
+        else:
+            self._action_dim_mask = None
+
     def _init_tokenizer(self):
         """Initialize PaliGemma tokenizer (HF AutoTokenizer or sentencepiece fallback)."""
         import os
@@ -199,11 +223,11 @@ class PaliGemma_OFT(BaseFramework):
                 from transformers import AutoTokenizer
                 self._hf_tokenizer = AutoTokenizer.from_pretrained(td)
                 self._tokenizer = None  # signal to use HF tokenizer
-                logger.info(f"[PaliGemmaOFT] Loaded HF tokenizer from {td}")
+                logger.info(f"[PaliGemmaPi] Loaded HF tokenizer from {td}")
                 return
             except Exception:
                 continue
-        
+
         # Fallback: sentencepiece
         import sentencepiece as spm
         # Sentencepiece fallback: env var first, then project-local tokenizer.model
@@ -217,7 +241,7 @@ class PaliGemma_OFT(BaseFramework):
             if os.path.exists(c):
                 self._tokenizer = spm.SentencePieceProcessor(model_file=c)
                 self._hf_tokenizer = None
-                logger.info(f"[PaliGemmaOFT] Loaded sentencepiece tokenizer from {c}")
+                logger.info(f"[PaliGemmaPi] Loaded sentencepiece tokenizer from {c}")
                 return
         raise FileNotFoundError("Cannot find PaliGemma tokenizer")
 
@@ -264,12 +288,12 @@ class PaliGemma_OFT(BaseFramework):
     def _prepare_prefix(self, examples):
         """
         Prepare prefix embeddings from examples.
-        
+
         For PaliGemma: use the native encode_prefix() method
         For Qwen/Llama: extract hidden states from VLM forward, treat as prefix
         """
         vlm_type = self._detect_vlm_type(self.config)
-        
+
         if vlm_type == "paligemma":
             return self._prepare_prefix_paligemma(examples)
         else:
@@ -277,11 +301,11 @@ class PaliGemma_OFT(BaseFramework):
 
     def _prepare_prefix_paligemma(self, examples):
         """Prepare prefix using PaliGemma's native encode_prefix.
-        
+
         Pipeline: images -> SigLIP -> projector -> image embeds
                   text -> sentencepiece -> embed_tokens -> text embeds
                   concat -> prefix
-        
+
         Configurable via framework.paligemma:
             num_images: total number of image slots (default: auto-detect from input)
             image_mask: list of bools per slot, False = zero-padded dummy (default: all True)
@@ -289,16 +313,16 @@ class PaliGemma_OFT(BaseFramework):
             max_token_len: max token length for instructions (default: 48)
         """
         import torchvision.transforms.functional as TF
-        
+
         device = next(self.parameters()).device
         dtype = next(self.parameters()).dtype
         B = len(examples)
         paligemma_cfg = getattr(self.config.framework, 'paligemma', None)
-        
+
         # --- Config-driven image settings ---
         cfg_num_images = getattr(paligemma_cfg, 'num_images', None) if paligemma_cfg else None
         cfg_image_mask = getattr(paligemma_cfg, 'image_mask', None) if paligemma_cfg else None
-        
+
         # --- Image preprocessing (multi-view support) ---
         def _process_single_img(img):
             """Process a single image to [3, 224, 224] normalized to [-1, 1]."""
@@ -320,7 +344,7 @@ class PaliGemma_OFT(BaseFramework):
             img = TF.resize(img, [224, 224], antialias=True)
             img = TF.normalize(img, mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # -> [-1, 1]
             return img
-        
+
         all_view_tensors = []  # list of [num_views, 3, 224, 224] per sample
         for ex in examples:
             img = ex["image"]
@@ -328,7 +352,7 @@ class PaliGemma_OFT(BaseFramework):
                 views = [_process_single_img(v) for v in img]
             else:
                 views = [_process_single_img(img)]
-            
+
             # Pad to cfg_num_images with zero images if configured
             # Note: zero uint8 image [0,0,0] after normalize (x/255 - 0.5)/0.5 = -1.0
             # So padding images should be all -1.0 to match openpi's np.zeros_like behavior
@@ -336,13 +360,13 @@ class PaliGemma_OFT(BaseFramework):
                 pad_img = torch.full((3, 224, 224), -1.0, dtype=views[0].dtype)
                 while len(views) < cfg_num_images:
                     views.append(pad_img)
-            
+
             all_view_tensors.append(torch.stack(views))  # [V, 3, 224, 224]
-        
+
         num_views = all_view_tensors[0].shape[0]
         # Stack all views across batch: [B, V, 3, 224, 224]
         pixel_values = torch.stack(all_view_tensors, dim=0).to(device=device, dtype=dtype)
-        
+
         # Build per-view image masks from config
         if cfg_image_mask is not None:
             # cfg_image_mask: list of bools, e.g. [true, true, false] for 3 views
@@ -353,13 +377,13 @@ class PaliGemma_OFT(BaseFramework):
                           for v in range(num_views)]
         else:
             masks_list = [torch.ones(B, dtype=torch.bool, device=device) for _ in range(num_views)]
-        
+
         # --- Text tokenization ---
         instructions = [ex["lang"] for ex in examples]
-        
+
         if self._tokenizer is None and not hasattr(self, '_hf_tokenizer'):
             self._init_tokenizer()
-        
+
         # Tokenize with configurable format
         tokenize_fmt = getattr(paligemma_cfg, 'tokenize_format', 'openpi') if paligemma_cfg else 'openpi'
         max_len = getattr(paligemma_cfg, 'max_token_len', 48) if paligemma_cfg else 48
@@ -367,7 +391,7 @@ class PaliGemma_OFT(BaseFramework):
         all_ids = []
         for i, text in enumerate(instructions):
             cleaned = text.strip().replace("_", " ").replace("\n", " ")
-            
+
             # Build prompt text based on discrete_state_input setting
             if discrete_state and "state" in examples[i]:
                 # π₀.₅ mode: discretize state into 256 bins and embed in prompt
@@ -388,7 +412,7 @@ class PaliGemma_OFT(BaseFramework):
             else:
                 # π₀ mode: state as continuous input (not in prompt)
                 prompt_text = cleaned
-            
+
             if tokenize_fmt == "openpi":
                 # openpi format: BOS + prompt_text (+ "\n" if not already ending with it)
                 if hasattr(self, '_hf_tokenizer') and self._hf_tokenizer is not None:
@@ -415,7 +439,7 @@ class PaliGemma_OFT(BaseFramework):
             if len(ids) > max_len:
                 ids = ids[:max_len]
             all_ids.append(ids)
-        
+
         # Pad token sequences to fixed length (openpi pads to max_token_len for consistent position ids)
         max_actual = max(len(ids) for ids in all_ids)
         pad_len = max(max_actual, max_len)  # use max_token_len as minimum pad length
@@ -424,28 +448,28 @@ class PaliGemma_OFT(BaseFramework):
         for i, ids in enumerate(all_ids):
             token_ids[i, :len(ids)] = torch.tensor(ids, dtype=torch.long)
             token_masks[i, :len(ids)] = True
-        
+
         # Encode prefix through VLM (multi-view: pass each view separately)
         view_tensors = pixel_values  # [B, V, 3, 224, 224]
         images_list = [view_tensors[:, v] for v in range(num_views)]  # list of [B, 3, 224, 224]
-        
+
         prefix_embs, prefix_pad_masks, prefix_att_masks = self.vlm_interface.encode_prefix(
             images=images_list,
             image_masks=masks_list,
             lang_tokens=token_ids,
             lang_masks=token_masks,
         )
-        
+
         return prefix_embs, prefix_pad_masks, prefix_att_masks
 
     def _prepare_prefix_llama_raw(self, examples):
         """
         For LlamaPi0: run full VLM forward, get final hidden states, project to expert width.
-        
+
         Llama 3.2 Vision has mixed self-attention and cross-attention layers
-        (cross-attention layers process vision features). True layer-wise joint 
+        (cross-attention layers process vision features). True layer-wise joint
         attention is not feasible because cross-attention layers lack self_attn.
-        
+
         Instead, we run the full VLM, project the output, and feed it to the
         action expert as prefix context. The action expert then does all 18 layers
         of self-attention over [projected_prefix | action_suffix].
@@ -456,13 +480,13 @@ class PaliGemma_OFT(BaseFramework):
     def _prepare_prefix_generic(self, examples):
         """
         Prepare prefix using Qwen/Llama VLM.
-        
+
         Strategy: Run VLM forward to get hidden states, use as prefix embeddings.
         This allows any VLM that produces hidden states to serve as the prefix encoder.
         """
         batch_images = [example["image"] for example in examples]
         instructions = [example["lang"] for example in examples]
-        
+
         # Build VLM inputs using existing interface
         if hasattr(self.vlm_interface, 'build_qwenvl_inputs'):
             vlm_inputs = self.vlm_interface.build_qwenvl_inputs(
@@ -474,48 +498,48 @@ class PaliGemma_OFT(BaseFramework):
             )
         else:
             raise NotImplementedError(f"VLM interface does not have a known input builder")
-        
+
         # Forward through VLM to get hidden states
         with torch.autocast("cuda", dtype=torch.bfloat16):
             outputs = self.vlm_interface.model(
                 **vlm_inputs, output_hidden_states=True
             )
-        
+
         # Use last hidden state as prefix embedding
         hidden_states = outputs.hidden_states[-1]  # [B, seq_len, H_vlm]
         bsize, seq_len, _ = hidden_states.shape
-        
+
         # Project VLM hidden states to action expert width if needed
         if self.prefix_proj is not None:
             hidden_states = self.prefix_proj(hidden_states.float()).to(hidden_states.dtype)
-        
+
         # Create masks (all valid, bidirectional attention for prefix)
         pad_masks = vlm_inputs.get("attention_mask", torch.ones(bsize, seq_len, dtype=torch.bool, device=hidden_states.device))
         att_masks = torch.zeros(bsize, seq_len, dtype=torch.bool, device=hidden_states.device)
-        
+
         return hidden_states, pad_masks, att_masks
 
     def forward(self, examples: List[dict] = None, **kwargs) -> Tuple:
         """
         Training forward pass.
-        
+
         Args:
             examples: list of dicts with keys: image, lang, action, (state)
-            
+
         Returns:
             (loss, metrics_dict)
         """
         actions = torch.stack([torch.tensor(ex["action"], dtype=torch.float32) for ex in examples])
         actions = actions.to(next(self.parameters()).device)
-        
+
         # Normalize actions (MEAN_STD) if enabled
         if self.use_action_norm:
             actions = (actions - self.action_mean.to(actions.device)) / (self.action_std.to(actions.device) + 1e-8)
-        
+
         # Pad action feature dim to model action_dim (e.g., robot 8-dim → base model 32-dim)
         if actions.shape[-1] < self.action_dim:
             actions = torch.nn.functional.pad(actions, (0, self.action_dim - actions.shape[-1]))
-        
+
         # Truncate/pad actions to action_horizon
         if actions.shape[1] > self.action_horizon:
             actions = actions[:, :self.action_horizon]
@@ -525,7 +549,7 @@ class PaliGemma_OFT(BaseFramework):
                 device=actions.device, dtype=actions.dtype
             )
             actions = torch.cat([actions, pad], dim=1)
-        
+
         # Get state if available (None for π₀.₅ with discrete state)
         state = None
         if not self.pi05 and "state" in examples[0]:
@@ -534,14 +558,14 @@ class PaliGemma_OFT(BaseFramework):
             # Pad state feature dim to model action_dim
             if state.shape[-1] < self.action_dim:
                 state = torch.nn.functional.pad(state, (0, self.action_dim - state.shape[-1]))
-        
+
         # Encode prefix
         prefix_embs, prefix_pad_masks, prefix_att_masks = self._prepare_prefix(examples)
-        
+
         # Check VLM type and framework to determine forward path
         vlm_type = self._detect_vlm_type(self.config)
         framework_name = self.config.framework.name
-        
+
         if framework_name == "LlamaPi0" and vlm_type == "llama":
             # LlamaPi0: Need VLM input embeddings (not full forward output)
             # because _shared_forward_llama handles layer-by-layer processing
@@ -575,9 +599,21 @@ class PaliGemma_OFT(BaseFramework):
                 state=state,
                 actions=actions,
             )
-        
+
+        # Apply action mask: only compute loss on valid dims (e.g. first 7 of 32)
+        # loss shape: [B, horizon, action_dim]
+        if hasattr(self, '_action_dim_mask') and self._action_dim_mask is not None:
+            mask = self._action_dim_mask.to(loss.device)  # [action_dim]
+            loss = loss[:, :, mask]  # [B, horizon, num_valid_dims]
+
         loss_mean = loss.mean()
         return {"action_loss": loss_mean, "flow_matching_loss": loss_mean.item()}
+
+    def _maybe_remap_gripper(self, actions: torch.Tensor) -> torch.Tensor:
+        """Map dim-6 from [0,1] to [+1,-1] when gripper_remap is enabled."""
+        if self.gripper_remap and actions.shape[-1] > 6:
+            actions[:, :, 6] = 1.0 - 2.0 * actions[:, :, 6]
+        return actions
 
     @torch.no_grad()
     @torch.amp.autocast('cuda', dtype=torch.bfloat16)
@@ -585,7 +621,7 @@ class PaliGemma_OFT(BaseFramework):
                        examples: List[dict] = None, unnorm_key=None, **kwargs):
         """
         Inference: predict actions via multi-step denoising.
-        
+
         Returns:
             np.ndarray: [B, action_horizon, action_dim] unnormalized actions
         """
@@ -594,7 +630,7 @@ class PaliGemma_OFT(BaseFramework):
         for m in self.modules():
             if hasattr(m, 'gradient_checkpointing'):
                 m.gradient_checkpointing = False
-        
+
         # Support both flat format (batch_images/instructions) and legacy examples format
         if examples is None and batch_images is not None:
             from PIL import Image
@@ -608,18 +644,18 @@ class PaliGemma_OFT(BaseFramework):
                 if states is not None and i < len(states):
                     ex["state"] = states[i]
                 examples.append(ex)
-        
+
         device = next(self.parameters()).device
-        
+
         state = None
         if not self.pi05 and "state" in examples[0]:
             state = torch.stack([torch.tensor(ex["state"], dtype=torch.float32) for ex in examples])
             state = state.to(device)
-        
+
         # Check VLM type and framework to determine inference path
         vlm_type = self._detect_vlm_type(self.config)
         framework_name = self.config.framework.name
-        
+
         if framework_name == "LlamaPi0" and vlm_type == "llama":
             # LlamaPi0: Llama VLM + Llama Action Expert with joint attention
             prefix_embs, prefix_pad_masks, prefix_att_masks = self._prepare_prefix_generic(examples)
@@ -632,11 +668,12 @@ class PaliGemma_OFT(BaseFramework):
                 state=state,
                 device=device,
             )
-            
+
             # Unnormalize actions if MEAN_STD normalization was used
             if self.use_action_norm:
                 actions = actions * self.action_std.to(actions.device) + self.action_mean.to(actions.device)
-            
+                actions = self._maybe_remap_gripper(actions)
+
             actions_np = actions.cpu().float().numpy()
             return {"normalized_actions": actions_np.tolist()}
         elif vlm_type != "paligemma":
@@ -649,14 +686,15 @@ class PaliGemma_OFT(BaseFramework):
                 state=state,
                 device=device,
             )
-            
+
             # Unnormalize actions if MEAN_STD normalization was used
             if self.use_action_norm:
                 actions = actions * self.action_std.to(actions.device) + self.action_mean.to(actions.device)
-            
+                actions = self._maybe_remap_gripper(actions)
+
             actions_np = actions.cpu().float().numpy()
             return {"normalized_actions": actions_np.tolist()}
-        
+
         # Traditional PaliGemma inference path below
         # Bypass _prepare_prefix — use openpi-style embed_prefix directly
         # Inline PaligemmaTokenizer logic (matches openpi's PaligemmaTokenizer)
@@ -664,13 +702,13 @@ class PaliGemma_OFT(BaseFramework):
         import torchvision.transforms.functional as TF
         import numpy as np_
         import math as _math
-        
+
         # Ensure tokenizer is initialized (reuse existing _init_tokenizer)
         if self._tokenizer is None and not hasattr(self, '_hf_tokenizer'):
             self._init_tokenizer()
-        
+
         _PREDICT_MAX_LEN = 200  # match openpi PaligemmaTokenizer default
-        
+
         def _tokenize_openpi_style(text, max_len=_PREDICT_MAX_LEN):
             """Tokenize text in openpi PaligemmaTokenizer format: BOS + cleaned_text + newline, padded to max_len."""
             cleaned = str(text).strip().replace("_", " ").replace("\n", " ")
@@ -689,7 +727,7 @@ class PaliGemma_OFT(BaseFramework):
                 ids = ids[:max_len]
                 mask = [True] * max_len
             return np_.asarray(ids), np_.asarray(mask)
-        
+
         def _proc_img(im):
             t = torch.from_numpy(im.copy()).float()
             if t.ndim == 3 and t.shape[-1] == 3:
@@ -698,7 +736,7 @@ class PaliGemma_OFT(BaseFramework):
             t = TF.resize(t, [224, 224], antialias=True)
             t = TF.normalize(t, mean=[0.5]*3, std=[0.5]*3)
             return t
-        
+
         ex = examples[0]
         imgs_raw = ex['image'] if isinstance(ex['image'], list) else [ex['image']]
         _dtype = next(self.parameters()).dtype
@@ -707,11 +745,11 @@ class PaliGemma_OFT(BaseFramework):
             img_tensors.append(torch.full((1, 3, 224, 224), -1.0, device=device, dtype=_dtype))
         img_masks_list = [torch.tensor([True], device=device)] * len(imgs_raw) + \
                          [torch.tensor([False], device=device)] * (3 - len(imgs_raw))
-        
+
         tokens, masks = _tokenize_openpi_style(ex['lang'])
         tokens_t = torch.tensor(tokens, dtype=torch.long).unsqueeze(0).to(device)
         masks_t = torch.tensor(masks, dtype=torch.bool).unsqueeze(0).to(device)
-        
+
         embs_list, pad_list, att_list = [], [], []
         for img_t, img_m in zip(img_tensors, img_masks_list):
             img_emb = self.vlm_interface.model.get_image_features(img_t)
@@ -719,18 +757,18 @@ class PaliGemma_OFT(BaseFramework):
             embs_list.append(img_emb)
             pad_list.append(img_m[:, None].expand(bsize, n_embs))
             att_list += [0] * n_embs
-        
+
         lang_emb = self.vlm_interface.model.embed_tokens(tokens_t)
         lang_emb = lang_emb * _math.sqrt(lang_emb.shape[-1])
         embs_list.append(lang_emb)
         pad_list.append(masks_t)
         att_list += [0] * lang_emb.shape[1]
-        
+
         prefix_embs = torch.cat(embs_list, dim=1)
         prefix_pad_masks = torch.cat(pad_list, dim=1)
         att_tensor = torch.tensor(att_list, dtype=torch.bool, device=device)
         prefix_att_masks = att_tensor[None, :].expand(bsize, -1)
-        
+
         # DEBUG: log prefix stats for comparison with openpi
         if not hasattr(self, '_debug_count'):
             self._debug_count = 0
@@ -753,21 +791,21 @@ class PaliGemma_OFT(BaseFramework):
                   f"lang[768:772]={prefix_embs[0,768,:4].float().cpu().tolist()}")
             import sys; sys.stdout.flush(); sys.stderr.flush()
             self._debug_count += 1
-        
+
         vlm_lm = self._get_vlm_language_model()
-        
+
         # Use openpi-style KV cache inference directly (proven to work in AB test)
         from AlphaBrain.model.modules.action_model.pi0_flow_matching_head.openpi_inference import make_att_2d_masks
         from transformers.models.gemma import modeling_gemma
-        
+
         bsize = prefix_pad_masks.shape[0]
-        
+
         # Step 1: prefix → KV cache through VLM language model
         prefix_att_2d = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
         prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
         prefix_att_4d = prefix_att_2d[:, None, :, :]
         prefix_att_4d = torch.where(prefix_att_4d, 0.0, -2.3819763e38)
-        
+
         vlm_lm.config._attn_implementation = "eager"
         prefix_output = vlm_lm.forward(
             inputs_embeds=prefix_embs,
@@ -784,35 +822,35 @@ class PaliGemma_OFT(BaseFramework):
             _use_dynamic_cache = True
         else:
             _use_dynamic_cache = False
-        
+
         # Step 2: iterative denoising through action expert
         expert_model = self.flow_matching_head.action_expert.model.model
         num_steps = self.flow_matching_head.num_inference_steps
         dt = -1.0 / num_steps
         dt_t = torch.tensor(dt, dtype=torch.float32, device=device)
-        
+
         noise = torch.randn(bsize, self.action_horizon, self.action_dim, dtype=torch.float32, device=device)
         x_t = noise
         time = torch.tensor(1.0, dtype=torch.float32, device=device)
-        
+
         while time >= -dt_t / 2:
             expanded_time = time.expand(bsize)
             suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.flow_matching_head.embed_suffix(
                 state, x_t, expanded_time
             )
-            
+
             suffix_len = suffix_pad_masks.shape[1]
             prefix_len = prefix_pad_masks.shape[1]
-            
+
             prefix_pad_2d = prefix_pad_masks[:, None, :].expand(bsize, suffix_len, prefix_len)
             suffix_att_2d = make_att_2d_masks(suffix_pad_masks, suffix_att_masks)
             full_att_2d = torch.cat([prefix_pad_2d, suffix_att_2d], dim=2)
             full_att_4d = full_att_2d[:, None, :, :]
             full_att_4d = torch.where(full_att_4d, 0.0, -2.3819763e38)
-            
+
             prefix_offsets = torch.sum(prefix_pad_masks, dim=-1)[:, None]
             suffix_position_ids = prefix_offsets + torch.cumsum(suffix_pad_masks, dim=1) - 1
-            
+
             expert_model.config._attn_implementation = "eager"
             # Rebuild fresh DynamicCache each step: prevents expert K,V from
             # accumulating across denoising steps (DynamicCache is stateful in 4.45+).
@@ -829,46 +867,23 @@ class PaliGemma_OFT(BaseFramework):
                 use_cache=False,
                 adarms_cond=adarms_cond,
             )
-            
+
             suffix_out = suffix_output.last_hidden_state
             suffix_out = suffix_out[:, -self.action_horizon:]
             suffix_out = suffix_out.to(dtype=torch.float32)
             v_t = self.flow_matching_head.action_out_proj(suffix_out)
-            
+
             x_t = x_t + dt_t * v_t
             time = time + dt_t
-        
+
         actions = x_t
-        
+
         # Unnormalize actions if MEAN_STD normalization was used
         if self.use_action_norm:
             actions = actions * self.action_std.to(actions.device) + self.action_mean.to(actions.device)
-        
+            actions = self._maybe_remap_gripper(actions)
+
         actions_np = actions.cpu().float().numpy()
-        
+
         # Return actions (unnormalized if norm was enabled, raw otherwise)
         return {"normalized_actions": actions_np.tolist()}
-        
-        # Enable gradient checkpointing to save memory
-        if hasattr(self.vlm_interface, 'model'):
-            if hasattr(self.vlm_interface.model, 'gradient_checkpointing_enable'):
-                self.vlm_interface.model.gradient_checkpointing_enable()
-            # For PaliGemmaVLM: enable on sub-models
-            if hasattr(self.vlm_interface.model, 'language_model') and hasattr(self.vlm_interface.model.language_model, 'gradient_checkpointing_enable'):
-                self.vlm_interface.model.language_model.gradient_checkpointing_enable()
-            if hasattr(self.vlm_interface.model, 'vision_tower') and hasattr(self.vlm_interface.model.vision_tower, 'gradient_checkpointing_enable'):
-                self.vlm_interface.model.vision_tower.gradient_checkpointing_enable()
-        # Freeze VLM language model and lm_head to save GPU memory
-        # Only train: vision_tower + projector + action_expert + flow matching head
-        if hasattr(self.vlm_interface, 'model'):
-            for name, param in self.vlm_interface.model.named_parameters():
-                if 'language_model' in name or 'lm_head' in name:
-                    param.requires_grad = False
-            frozen = sum(1 for p in self.vlm_interface.model.parameters() if not p.requires_grad)
-            total = sum(1 for p in self.vlm_interface.model.parameters())
-            trainable_m = sum(p.numel() for p in self.vlm_interface.model.parameters() if p.requires_grad) / 1e6
-            print(f'[PaliGemmaOFT] VLM: frozen {frozen}/{total} params, trainable {trainable_m:.0f}M (vision+projector)')
-
-        if hasattr(self.flow_matching_head, 'action_expert') and hasattr(self.flow_matching_head.action_expert.model, 'gradient_checkpointing_enable'):
-            self.flow_matching_head.action_expert.model.gradient_checkpointing_enable()
-
