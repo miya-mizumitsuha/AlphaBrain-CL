@@ -234,7 +234,7 @@ fine-tuning (positive = better).
 
 | Architecture  | Method                | Avg SR    | NBT       | Rollouts/task |
 |:--------------|:----------------------|:---------:|:---------:|:-------------:|
-| **QwenGR00T** | **LoRA (r=32) + MIR** | **76.0 %**| **+0.36** | **50** |
+| **QwenGR00T** | **LoRA (r=32) + MIR (refresh50)** | **77.0 %** | **+0.40** | **50** |
 | QwenGR00T     | Full-parameter + ER   | 51.6 %    | +0.05     | 50 |
 | QwenGR00T     | LoRA (r=32) + ER      | ~48 %     | +0.15     | 10 |
 | NeuroVLA      | Full-parameter + ER   | ~40 %     | +0.40     | 10 |
@@ -258,17 +258,20 @@ The MIR row uses our recommended LIBERO-Goal recipe — see
 
 ### Recommended LIBERO-Goal recipe
 
+The four hyperparameter overrides from the MIR sweep that hit 77 % are
+frozen into a dedicated yaml — no CLI overrides needed:
+
 ```bash
 bash scripts/run_continual_learning_scripts/run_cl_train.sh \
-    --yaml configs/continual_learning/qwengr00t_mir_lora_libero.yaml \
-    --gpus 0,1,2,3 -- \
-    --continual_learning.algorithm.buffer_size_per_task=1000 \
-    --continual_learning.algorithm.replay_batch_ratio=0.5 \
-    --continual_learning.algorithm.balanced_sampling=true \
-    --continual_learning.algorithm.mir_refresh_interval=50
+    --yaml configs/continual_learning/qwengr00t_mir_lora_libero_refresh50.yaml \
+    --gpus 0,1,2,3
 ```
 
-Expect ~17 h on 4× A800 80 GB; final Avg SR ≈ 76 % at 50 rollouts/task.
+Differences vs the baseline `qwengr00t_mir_lora_libero.yaml`:
+`buffer_size_per_task` 500 → 1000, `replay_batch_ratio` 0.3 → 0.5,
+`balanced_sampling` false → true, `mir_refresh_interval` 200 → 50.
+
+Expect ~17 h on 4× A800 80 GB; final Avg SR ≈ 77 % at 50 rollouts/task.
 
 ---
 
