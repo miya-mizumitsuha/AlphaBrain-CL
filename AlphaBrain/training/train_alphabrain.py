@@ -373,6 +373,53 @@ class VLATrainer(TrainerUtils):
                 group="vla-train",
             )
 
+    def _load_pretrained_dispatch(self, model, checkpoint_path, reload_modules=None):
+        """
+        Auto-dispatch to π₀ weight bridge for pi0/pi05 frameworks; fall back to
+        the generic key-by-key loader otherwise.
+
+        Why: openpi/lerobot π₀ checkpoints use a different key layout
+        (`paligemma_with_expert.*`, `action_in_proj.*`) than AlphaBrain's
+        decomposed modules (`vlm_interface.*`, `flow_matching_head.*`). The
+        generic loader matches 0/N keys; `load_pi0_weights` knows the mapping.
+        """
+        framework_name = getattr(self.config.framework, "name", "")
+        is_pi_family = framework_name in ("PaliGemmaPi0", "PaliGemmaPi05", "LlamaPi0", "LlamaPi05")
+
+        # Partial-module reload uses path-based key matching — generic loader only.
+        if reload_modules or not is_pi_family:
+            return self.load_pretrained_backbones(model, checkpoint_path, reload_modules=reload_modules)
+
+        resolved = checkpoint_path
+        if os.path.isdir(checkpoint_path):
+            for fname in ("model.safetensors", "pytorch_model.pt"):
+                cand = os.path.join(checkpoint_path, fname)
+                if os.path.exists(cand):
+                    resolved = cand
+                    break
+            else:
+                raise RuntimeError(
+                    f"checkpoint dir missing model.safetensors / pytorch_model.pt: {checkpoint_path}"
+                )
+
+        is_main = (not dist.is_initialized()) or dist.get_rank() == 0
+        from AlphaBrain.model.modules.action_model.pi0_flow_matching_head.weight_bridge import load_pi0_weights
+        if is_main:
+            logger.info(f"[ckpt] π₀ dispatch (framework={framework_name}): {resolved}")
+        summary = load_pi0_weights(model, resolved, strict=False, verbose=is_main)
+
+        if is_main:
+            matched = len(summary["matched"])
+            total = matched + len(summary["missing"])
+            ratio = (matched / total) if total else 0.0
+            tag = "[ok]" if ratio >= 0.95 else ("[partial]" if ratio >= 0.5 else "[low-coverage]")
+            logger.info(
+                f"{tag} π₀ load: matched={matched}/{total} ({ratio*100:.1f}%)  "
+                f"missing={len(summary['missing'])}  unexpected={len(summary['unexpected'])}  "
+                f"shape_mismatch={len(summary['shape_mismatch'])}  unmapped={len(summary['unmapped'])}"
+            )
+        return model
+
     def _init_checkpointing(self):
         """Initialize checkpoint directory and handle checkpoint loading."""
         self.checkpoint_dir = os.path.join(self.config.output_dir, "checkpoints")
@@ -435,7 +482,7 @@ class VLATrainer(TrainerUtils):
                     ckpt_file = os.path.join(resume_from_checkpoint, "model.safetensors")
                     if not os.path.isfile(ckpt_file):
                         ckpt_file = resume_from_checkpoint  # fallback to original path
-                    self.model = self.load_pretrained_backbones(
+                    self.model = self._load_pretrained_dispatch(
                         self.model, ckpt_file, reload_modules=None
                     )
                     self.resume_from_checkpoint = resume_from_checkpoint
@@ -448,7 +495,7 @@ class VLATrainer(TrainerUtils):
         # Load pretrained weights (not resume, start from step 0)
         if pretrained_checkpoint:
             reload_modules = getattr(self.config.trainer, "reload_modules", None)
-            self.model = self.load_pretrained_backbones(self.model, pretrained_checkpoint, reload_modules=reload_modules)
+            self.model = self._load_pretrained_dispatch(self.model, pretrained_checkpoint, reload_modules=reload_modules)
             self.completed_steps = 0
             self.resume_from_checkpoint = pretrained_checkpoint
             logger.info(f"Loaded pretrained checkpoint: {pretrained_checkpoint}")
