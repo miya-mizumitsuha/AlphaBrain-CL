@@ -226,20 +226,25 @@ on 10 tasks (50 demonstrations per task) and evaluating the final
 checkpoint against the full 10-task matrix.  Headline rows are at
 **50 rollouts per task** (the production CL eval); legacy
 cross-architecture rows are at 10 rollouts per task (early screening).
-**Avg SR** is the mean across the 10 tasks; **NBT** (Negative Backward
-Transfer) measures forgetting suppression relative to naive sequential
-fine-tuning (positive = better).
+**Avg SR** is the mean across the 10 tasks; **BWT** (Backward Transfer,
+Lopez-Paz & Ranzato 2017) is `1/(N−1) · Σ_{i<N} (a_{N,i} − a_{i,i})` in
+percentage points: `0` = no forgetting, negative = the final checkpoint
+performs worse on prior tasks than right after training them.  BWT
+requires the full T×T evaluation matrix; rows without one are marked
+`—` and will be filled in once their matrix re-eval lands.  Recompute
+ASR / BWT / F for any matrix run via
+[`compute_cl_matrix_metrics.py`](compute_cl_matrix_metrics.py).
 
 <div align="center">
 
-| Architecture  | Method                | Avg SR    | NBT       | Rollouts/task |
-|:--------------|:----------------------|:---------:|:---------:|:-------------:|
-| **QwenGR00T** | **LoRA (r=32) + MIR (refresh50)** | **77.0 %** | **+0.40** | **50** |
-| QwenGR00T     | Full-parameter + ER   | 51.6 %    | +0.05     | 50 |
-| QwenGR00T     | LoRA (r=32) + ER      | ~48 %     | +0.15     | 10 |
-| NeuroVLA      | Full-parameter + ER   | ~40 %     | +0.40     | 10 |
-| NeuroVLA      | LoRA (r=32) + ER      | ~28 %     | +0.25     | 10 |
-| LlamaOFT      | LoRA (r=16) + ER      | ~17 %     | +0.50     | 10 |
+| Architecture  | Method                | Avg SR    | BWT (pp) | Rollouts/task |
+|:--------------|:----------------------|:---------:|:--------:|:-------------:|
+| **QwenGR00T** | **LoRA (r=32) + MIR (refresh50)** | **77.0 %** | **−7.8** | **50** |
+| QwenGR00T     | Full-parameter + ER   | 51.6 %    | —        | 50 |
+| QwenGR00T     | LoRA (r=32) + ER      | ~48 %     | —        | 10 |
+| NeuroVLA      | Full-parameter + ER   | ~40 %     | —        | 10 |
+| NeuroVLA      | LoRA (r=32) + ER      | ~28 %     | —        | 10 |
+| LlamaOFT      | LoRA (r=16) + ER      | ~17 %     | —        | 10 |
 | QwenGR00T     | LoRA (r=32) + EWC     | _no convergent λ in 1e3–1e10 sweep_ | — | — |
 
 </div>
