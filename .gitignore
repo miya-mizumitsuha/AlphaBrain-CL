@@ -270,4 +270,14 @@ docs/continual_learning/sweep_*.md
 EXPERIMENT_LOG*.md
 *_sweep_results.md
 *_sweep_results.json
+
+# ============================================================================
+# PHASER (phase-aware replay) — under-review paper; never push to remote.
+# All algorithm code, configs, stage_info JSON, and eval artefacts stay local.
+# ============================================================================
+AlphaBrain/training/continual_learning/algorithms/rehearsal_based/phaser.py
+configs/continual_learning/stage_info/
+configs/continual_learning/*phaser*.yaml
+scripts/run_continual_learning_scripts/run_phaser_*.sh
+scripts/phase_segmentation/
 results/
