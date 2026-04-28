@@ -273,11 +273,89 @@ they're nested under `<split>/<env_name>/stats.json` with an
 
 ---
 
-## Custom task streams (non-LIBERO benchmarks)
+## Robocasa-atomic10 (built-in benchmark)
 
-The same `run_cl_train.sh` handles task streams beyond LIBERO. Users can
-(a) select from ready-made Robocasa365 presets, or (b) define their own
-stream inline in a YAML config.
+A 10-task continual-learning stream over **atomic kitchen tasks** in
+Robocasa365 — `NavigateKitchen`, `OpenDrawer`, `OpenCabinet`,
+`CloseFridge`, `CloseBlenderLid`, `CoffeeSetupMug`,
+`PickPlaceCounterToCabinet`, `PickPlaceSinkToCounter`, `TurnOnMicrowave`,
+`TurnOffStove`.  Each task is one sub-dataset under
+`pretrain/atomic/<TaskName>/<date>/lerobot/`; the trainer treats one
+sub-dataset as one CL task (`task_stream_mode: by_dataset`).
+
+### 1.  Data layout
+
+```
+$ROBOCASA365_DATA_DIR/
+├── pretrain/atomic/NavigateKitchen/<date>/lerobot/   ← in-distribution split (used for both train + eval)
+├── pretrain/atomic/OpenDrawer/<date>/lerobot/
+├── ... (10 atomic tasks total)
+└── target/atomic/<TaskName>/<date>/lerobot/          ← held-out OOD scenes (eval-only stress test)
+```
+
+### 2.  One-time `.env` setup
+
+```bash
+cat >> .env <<EOF
+ROBOCASA365_DATA_DIR=/path/to/robocasa/v1.0
+ROBOCASA365_PYTHON=/path/to/robocasa-conda-env/bin/python   # has robocasa + robosuite
+EOF
+```
+
+### 3.  Train (~12 h on 4× A800)
+
+```bash
+# QwenGR00T + LoRA + ER on Robocasa-atomic10
+bash scripts/run_continual_learning_scripts/run_cl_train.sh \
+    --yaml configs/continual_learning/qwengr00t_er_lora_robocasa_atomic10.yaml \
+    --gpus 0,1,2,3
+
+# Or QwenGR00T + LoRA + MIR
+bash scripts/run_continual_learning_scripts/run_cl_train.sh \
+    --yaml configs/continual_learning/qwengr00t_mir_lora_robocasa_atomic10.yaml \
+    --gpus 0,1,2,3
+```
+
+### 4.  Eval (50 episodes × 10 tasks)
+
+```bash
+bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
+    --benchmark robocasa \
+    --run-id <YOUR_RUN_ID> \
+    --base-config configs/continual_learning/qwengr00t_er_lora_robocasa_atomic10.yaml \
+    --gpus 0 --n-episodes 50 --split pretrain --last-only
+```
+
+> **Important — `--split` choice.**  Use `pretrain` (default) for the
+> standard in-distribution evaluation that matches training data.  Use
+> `target` only if you want to stress-test on held-out OOD scenes;
+> expect near-0% SR there because the policy never saw those scenes.
+
+### 5.  (Optional) Recompute / repair `dataset_statistics.json`
+
+If a run dir is missing `dataset_statistics.json` (legacy runs) or the
+file came from a different mixture, eval will mis-denormalize actions
+and you'll see ~0% SR even with a well-trained checkpoint.  Recompute
+on the fly:
+
+```bash
+python scripts/compute_dataset_statistics.py \
+    --config configs/continual_learning/qwengr00t_er_lora_robocasa_atomic10.yaml \
+    --out results/Checkpoints/<RUN_ID>/dataset_statistics.json
+```
+
+The script auto-detects binary-gripper axes (LIBERO convention,
+`q01==0 ∧ q99==1`) and forces `mask=False` on those — required for the
+eval-side `unnormalize_actions` to take the binarize-then-passthrough
+branch.  Robocasa has no such binary axis so its mask stays all-True.
+
+---
+
+## Custom task streams (other benchmarks)
+
+The same `run_cl_train.sh` handles task streams beyond LIBERO and
+Robocasa.  Users can either select from built-in mixtures or define
+their own stream inline in a YAML config.
 
 ```bash
 # 1. One-time: point .env at the benchmark's LeRobot data root
