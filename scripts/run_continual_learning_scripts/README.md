@@ -234,28 +234,27 @@ task.
 
 ### Evaluation
 
+`run_cl_eval.sh` handles both LIBERO and Robocasa-atomic10 via
+`--benchmark` (default: libero).
+
 ```bash
-cd /path/to/AlphaBrain-CL
-
-# Full 10×10 matrix — LoRA run (2 GPUs parallel)
+# LIBERO (default) — final ckpt × 50 trials
 bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
-    --run-id qwengr00t_er_lora_libero_goal_v1 \
-    --base-config configs/continual_learning/qwengr00t_er_lora_libero.yaml \
-    --gpus 0,1
+    --run-id qwengr00t_mir_lora_libero_goal_v1 \
+    --base-config configs/continual_learning/qwengr00t_mir_lora_libero.yaml \
+    --gpus 0,1 --trials 50 --last-only
 
-# Full-parameter run (no --base-config needed)
+# Robocasa-atomic10 — pretrain split, 50 episodes/task
 bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
-    --run-id neurovla_er_libero_goal_v1 --gpus 1
-
-# Quick final-checkpoint sanity check (single GPU)
-bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
-    --run-id qwengr00t_er_lora_libero_goal_v1 \
-    --base-config configs/continual_learning/qwengr00t_er_lora_libero.yaml \
-    --gpus 0 --last-only
+    --benchmark robocasa \
+    --run-id qwengr00t_er_lora_robocasa_atomic10_v1 \
+    --base-config configs/continual_learning/qwengr00t_er_lora_robocasa_atomic10.yaml \
+    --gpus 0 --n-episodes 50 --last-only
 ```
 
-Per-task success rates and the overall matrix are written to
-`results/eval_cl/<run_id>/`.
+Per-task results land in `results/eval_cl/<run_id>/`.  For Robocasa,
+they're nested under `<split>/<env_name>/stats.json` with an
+`aggregate_stats.json` next to them.
 
 ---
 
@@ -299,10 +298,6 @@ Implementation notes, built-in Robocasa365 presets, and guidance for
 adding new benchmarks are collected in
 [`README_custom_streams.md`](README_custom_streams.md).
 
-> **Evaluation scope.** `run_cl_eval.sh` currently launches the LIBERO
-> simulator. Evaluation for Robocasa365 or other custom benchmarks
-> requires wiring their respective simulation environment and is not
-> yet covered by this wrapper.
 
 ---
 
