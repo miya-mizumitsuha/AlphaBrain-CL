@@ -185,7 +185,6 @@ data_processed
 llavavla/conf/qwenvla_lmdb_3Lpretrain.yaml
 extracted_frames
 **/bar
-llavavla/model/openvla_temp
 real_deployment/upload/push_model_to_hf.py
 real_deployment/deploy/*bar
 **/*.mp4

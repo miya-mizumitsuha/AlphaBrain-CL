@@ -167,7 +167,6 @@ final-checkpoint matrix eval.
 
 | Backbone          | Method        | ASR    |
 |:------------------|:--------------|:------:|
-| OpenVLA-7B + LoRA | ER            | 77.6 % |
 | QwenGR00T (full)  | ER            | 51.6 % |
 
 ### Reproduce the 77 % MIR recipe
