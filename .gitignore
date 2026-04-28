@@ -282,4 +282,14 @@ scripts/run_continual_learning_scripts/run_phaser_*.sh
 scripts/phase_segmentation/
 scripts/_phaser_*.sh
 scripts/_phaser_*.py
+
+# Sweep / hyperparameter-search artefacts — intermediate, never push.
+# Keep frozen recipe yamls (e.g. *_refresh50.yaml); exclude any *_sweep_* /
+# *_widepool_* / *_aligned_* style variants.
+scripts/run_continual_learning_scripts/run_*_sweep.sh
+scripts/run_continual_learning_scripts/run_*_lambda_sweep.sh
+configs/continual_learning/*_sweep_*.yaml
+configs/continual_learning/*_widepool_*.yaml
+configs/continual_learning/*_aligned_*.yaml
+*_sweep.py
 results/
