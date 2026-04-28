@@ -2,20 +2,31 @@
 # =============================================================================
 # Continual Learning Matrix Evaluation — one-command, self-contained.
 #
-# Evaluates every task_*_... checkpoint in a CL run directory on all 10 LIBERO
-# tasks, building the 10×10 success-rate matrix. Auto-detects LoRA (runs
-# adapter+action_model merge first). Parallelizes across --gpus.
+# Evaluates every task_*_... checkpoint in a CL run directory across the full
+# task suite, building the T×T success-rate matrix.  Auto-detects LoRA (runs
+# adapter + action_model merge first) and parallelises across --gpus.
+#
+# Two benchmarks via --benchmark (default: libero):
+#   libero    : LIBERO-Goal / Spatial / Object / Long (10 tasks each).
+#   robocasa  : Robocasa-atomic10 (10 atomic kitchen tasks).
 #
 # Usage (from repo root):
-#   # Full-param run (no LoRA merge needed)
+#   # LIBERO LoRA run
+#   bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
+#       --run-id qwengr00t_mir_lora_libero_goal_v1 \
+#       --base-config configs/continual_learning/qwengr00t_mir_lora_libero.yaml \
+#       --gpus 0,1 --suite libero_goal --trials 50 --last-only
+#
+#   # LIBERO full-param run (no --base-config needed)
 #   bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
 #       --run-id neurovla_er_libero_goal_v1 --gpus 0
 #
-#   # LoRA run (supply --base-config)
+#   # Robocasa-atomic10 LoRA run (50 episodes/task on the pretrain split)
 #   bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
-#       --run-id alphabrain_er_lora_libero_goal_v1 \
-#       --base-config configs/continual_learning/qwengr00t_er_lora_libero.yaml \
-#       --gpus 0,1
+#       --benchmark robocasa \
+#       --run-id qwengr00t_er_lora_robocasa_atomic10_v1 \
+#       --base-config configs/continual_learning/qwengr00t_er_lora_robocasa_atomic10.yaml \
+#       --gpus 0 --n-episodes 50 --last-only
 # =============================================================================
 set -euo pipefail
 
@@ -84,26 +95,29 @@ Robocasa-specific (--benchmark robocasa):
   --n-envs N            Vectorized envs per task (default 1)
   --n-action-steps N    Action chunk size returned per server call (default 16)
 
-Typical modes (run-id → base-config mapping for LoRA runs):
-  RUN_ID                                      | BASE_CONFIG
-  alphabrain_er_lora_libero_goal_v1 (5d)      | configs/continual_learning/qwengr00t_er_lora_libero.yaml
-  neurovla_er_lora_libero_goal_5k (5h)                 | configs/continual_learning/neurovla_er_lora_libero.yaml
-  llamaoft_er_lora_libero_goal_5k (5l)     | configs/continual_learning/llamaoft_er_lora_libero.yaml
-  neurovla_er_libero_goal_v1 (5f, full-param) | (omit --base-config — no LoRA merge)
+Run-id → base-config conventions for LoRA runs:
+  qwengr00t_*_lora_libero*    | configs/continual_learning/qwengr00t_{er,mir}_lora_libero[_*].yaml
+  qwengr00t_*_lora_robocasa*  | configs/continual_learning/qwengr00t_{er,mir}_lora_robocasa_atomic10.yaml
+  neurovla_*_lora_*           | configs/continual_learning/neurovla_er_lora_libero.yaml
+  llamaoft_*_lora_*           | configs/continual_learning/llamaoft_er_lora_libero.yaml
+  Full-param runs             | omit --base-config (no adapter merge)
 
 Examples:
-  # 5d full matrix, 2 GPU
-  bash $0 --run-id alphabrain_er_lora_libero_goal_v1 \\
-          --base-config configs/continual_learning/qwengr00t_er_lora_libero.yaml \\
-          --gpus 0,1
-
-  # 5f (full-param) single GPU
-  bash $0 --run-id neurovla_er_libero_goal_v1 --gpus 1
-
-  # Custom trial count
-  bash $0 --run-id alphabrain_er_lora_libero_goal_v1 \\
-          --base-config configs/continual_learning/qwengr00t_er_lora_libero.yaml \\
+  # LIBERO-Goal LoRA + MIR — full 10×10 matrix, 2 GPU, 50 trials
+  bash $0 --run-id qwengr00t_mir_lora_libero_goal_v1 \\
+          --base-config configs/continual_learning/qwengr00t_mir_lora_libero.yaml \\
           --gpus 0,1 --trials 50
+
+  # LIBERO-Long quick sanity check (last ckpt only)
+  bash $0 --run-id qwengr00t_er_lora_libero_long_v1 \\
+          --base-config configs/continual_learning/qwengr00t_er_lora_libero_long.yaml \\
+          --suite libero_10 --gpus 0 --trials 10 --last-only
+
+  # Robocasa-atomic10 final-ckpt eval (50 episodes × 10 tasks)
+  bash $0 --benchmark robocasa \\
+          --run-id qwengr00t_er_lora_robocasa_atomic10_v1 \\
+          --base-config configs/continual_learning/qwengr00t_er_lora_robocasa_atomic10.yaml \\
+          --gpus 0 --n-episodes 50 --last-only
 EOF
 }
 

@@ -2,14 +2,15 @@
 # =============================================================================
 # Continual Learning Training — one-command, self-contained.
 #
-# Takes a yaml config path directly via --yaml; default is 5d
-# (QwenGR00T LoRA + ER, 🏆 52%). No --mode alias magic: one yaml → one run.
+# Takes a yaml config path directly via --yaml.  Default: QwenGR00T LoRA +
+# ER on LIBERO-Goal.  One yaml → one run; switch CL algorithm / backbone /
+# benchmark by pointing --yaml at a different preset.
 #
 # Usage (from repo root):
-#   bash scripts/run_continual_learning_scripts/run_cl_train.sh                    # 5d default
+#   bash scripts/run_continual_learning_scripts/run_cl_train.sh                    # default (QwenGR00T LoRA + ER)
 #   bash scripts/run_continual_learning_scripts/run_cl_train.sh --smoke            # 5 step × 10 task smoke
 #   bash scripts/run_continual_learning_scripts/run_cl_train.sh \
-#       --yaml configs/continual_learning/neurovla_er_libero.yaml           # switch to 5f
+#       --yaml configs/continual_learning/qwengr00t_mir_lora_libero_refresh50.yaml # MIR 77% recipe
 #   bash scripts/run_continual_learning_scripts/run_cl_train.sh --run-id exp_v2 --gpus 4
 #   bash scripts/run_continual_learning_scripts/run_cl_train.sh -- \
 #       --continual_learning.steps_per_task=2000                                    # pass-through OmegaConf override
@@ -21,7 +22,7 @@ REPO_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 cd "$REPO_ROOT"
 
 # ---------- defaults ----------
-YAML="configs/continual_learning/qwengr00t_er_lora_libero.yaml"  # 5d QwenGR00T LoRA + ER (best)
+YAML="configs/continual_learning/qwengr00t_er_lora_libero.yaml"  # QwenGR00T LoRA + ER on LIBERO-Goal
 GPUS=""
 RUN_ID=""
 # Default port: Python socket-bind to get a guaranteed-free port from the OS.
@@ -39,19 +40,26 @@ usage() {
 Usage: bash $0 [options] [-- OmegaConf overrides]
 
 Common:
-  --yaml PATH        CL config yaml. Default: ${YAML} (5d 🏆)
-                     Available in configs/continual_learning/:
-                       qwengr00t_er_libero.yaml       (5a/5b Full-param + ER)
-                       qwengr00t_er_lora_libero.yaml         (5d LoRA + ER 🏆, default)
-                       qwengr00t_er_lora_test.yaml           (smoke-sized LoRA + ER)
-                       qwengr00t_ewc_lora_test.yaml       (smoke-sized LoRA + EWC)
-                       qwengr00t_mir_lora_test.yaml       (smoke-sized LoRA + MIR)
-                       qwengr00t_er_lora_libero_spatial.yaml (LoRA + ER on LIBERO-Spatial)
-                       neurovla_er_libero.yaml        (5e/5f Full-param + ER)
-                       neurovla_er_lora_libero.yaml          (5g/5h LoRA + ER)
-                       llama_oft_er_libero.yaml       (5i/5j Frozen LLM + ER)
-                       llamaoft_er_lora_libero.yaml          (5k/5l LoRA + ER)
-                       paligemma_oft_er_libero.yaml   (PaliGemmaOFT Full-param + ER)
+  --yaml PATH        CL config yaml.  Default: ${YAML}
+                     Available in configs/continual_learning/ (see scripts/run_continual_learning_scripts/README.md
+                     for the full table).  Highlights:
+                       LIBERO-Goal:
+                         qwengr00t_er_lora_libero.yaml             (LoRA + ER, default)
+                         qwengr00t_mir_lora_libero.yaml            (LoRA + MIR, default knobs)
+                         qwengr00t_mir_lora_libero_refresh50.yaml  (LoRA + MIR — 77% recipe)
+                         qwengr00t_er_libero.yaml                  (Full-param + ER)
+                         qwengr00t_ewc_lora_libero.yaml            (LoRA + EWC)
+                       LIBERO-Long (libero_10):
+                         qwengr00t_er_lora_libero_long.yaml        (LoRA + ER)
+                       Robocasa-atomic10:
+                         qwengr00t_er_lora_robocasa_atomic10.yaml  (LoRA + ER)
+                         qwengr00t_mir_lora_robocasa_atomic10.yaml (LoRA + MIR)
+                       Other backbones (LIBERO-Goal):
+                         neurovla_er_lora_libero.yaml              (NeuroVLA  + LoRA + ER)
+                         llamaoft_er_lora_libero.yaml              (LlamaOFT  + LoRA + ER)
+                         paligemma_oft_er_libero.yaml              (PaliGemmaOFT Full-param + ER)
+                       Smoke configs (pipeline check, not convergence):
+                         qwengr00t_er_lora_test.yaml / qwengr00t_mir_lora_test.yaml / qwengr00t_ewc_lora_test.yaml
   --run-id ID        Override run_id in yaml (checkpoint dir name)
   --gpus SPEC        Either a count ("2") or a GPU-id list ("1,2,3"). A list
                      pins CUDA_VISIBLE_DEVICES to those IDs. (default: auto-detect)
@@ -61,14 +69,17 @@ Common:
   -h, --help         Show this help
 
 Examples:
-  # default 5d training (~15 h on 2× A800)
+  # default training (~15 h on 2× A800)
   bash $0
 
   # smoke test to verify pipeline
   bash $0 --smoke
 
-  # NeuroVLA Full-param + ER (5f, ~22 h)
-  bash $0 --yaml configs/continual_learning/neurovla_er_libero.yaml --run-id my_5f_run
+  # MIR 77% LIBERO-Goal recipe
+  bash $0 --yaml configs/continual_learning/qwengr00t_mir_lora_libero_refresh50.yaml --gpus 0,1,2,3
+
+  # Robocasa-atomic10 with ER
+  bash $0 --yaml configs/continual_learning/qwengr00t_er_lora_robocasa_atomic10.yaml
 
   # custom override passed to OmegaConf
   bash $0 --yaml configs/continual_learning/qwengr00t_er_lora_libero.yaml -- \\

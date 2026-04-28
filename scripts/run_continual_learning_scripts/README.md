@@ -5,14 +5,21 @@ train a single Vision-Language-Action (VLA) backbone sequentially over a
 stream of manipulation tasks, then evaluate the final checkpoint on the
 full task matrix.
 
-The trainer now supports a **pluggable family of CL algorithms** grouped
-into three categories (rehearsal / regularization / dynamic), configured
-entirely through YAML — no code edits needed to switch methods.
+CL algorithms plug into a single `CLAlgorithm` hook interface and are
+selected entirely via YAML — switching methods needs no code edits.
+Benchmarks are equally pluggable: the LIBERO suites and Robocasa-atomic10
+ship in-tree; arbitrary LeRobot-format task streams are supported via the
+[Custom task streams](#custom-task-streams-non-libero-benchmarks) section.
 
-The pipeline is benchmark-agnostic: out of the box it covers the four
-LIBERO suites; with a single flag it also runs on Robocasa365 or on any
-user-defined stream of LeRobot-format task folders (see
-[Custom task streams](#custom-task-streams-non-libero-benchmarks) below).
+## What's new
+
+| Addition                                           | Where                                                                            |
+|:---------------------------------------------------|:---------------------------------------------------------------------------------|
+| **MIR** (Maximally Interfered Retrieval) — replay  | `algorithms/rehearsal_based/mir.py`, see [§MIR](#mir-maximally-interfered-retrieval--rehearsal_based) |
+| **Robocasa-atomic10** — 10-task CL stream          | `qwengr00t_{er,mir}_lora_robocasa_atomic10.yaml` + eval branch                   |
+| **LIBERO-Long (libero_10)** — 10 long-horizon tasks| `qwengr00t_er_lora_libero_long.yaml`                                             |
+| Merged eval entry point — `run_cl_eval.sh --benchmark {libero,robocasa}` | replaces former `run_cl_eval_robocasa.sh`                          |
+| `compute_cl_matrix_metrics.py` — ASR / BWT / F     | computes Lopez-Paz BWT + Chaudhry forgetting from a 10×10 eval matrix            |
 
 Four VLA architectures are supported, each with full-parameter and
 **Low-Rank Adaptation (LoRA)** variants:
@@ -169,15 +176,24 @@ final-checkpoint matrix eval.
 |:------------------|:--------------|:------:|
 | QwenGR00T (full)  | ER            | 51.6 % |
 
-### Reproduce the 77 % MIR recipe
+### Reproduce the 77 % MIR recipe (LIBERO-Goal, full 10×10 matrix)
 
 ```bash
+# 1. Train (~17 h on 4× A800 80 GB)
 bash scripts/run_continual_learning_scripts/run_cl_train.sh \
     --yaml configs/continual_learning/qwengr00t_mir_lora_libero_refresh50.yaml \
     --gpus 0,1,2,3
+
+# 2. Eval (50 trials × 10 tasks; final ckpt only)
+bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
+    --run-id qwengr00t_mir_lora_libero_goal_refresh50_v1 \
+    --base-config configs/continual_learning/qwengr00t_mir_lora_libero_refresh50.yaml \
+    --gpus 0,1 --trials 50 --last-only
 ```
 
-~17 h on 4× A800 80 GB.
+For the BWT/F numbers a full 10×10 matrix eval is required — drop
+`--last-only` to evaluate every per-task checkpoint, then run
+`compute_cl_matrix_metrics.py results/eval_cl/<run_id>`.
 
 ### Metrics
 
@@ -340,48 +356,68 @@ Optional (only for non-LIBERO streams):
 
 **Available yaml presets** (under `configs/continual_learning/`):
 
-| Yaml                                            | Backbone     | Variant         | Algo |
-|:------------------------------------------------|:-------------|:----------------|:-----|
-| **`qwengr00t_er_lora_libero.yaml`** (default)   | QwenGR00T    | LoRA (r=32)     | ER   |
-| `qwengr00t_er_lora_libero_long.yaml`            | QwenGR00T    | LoRA, libero_10 | ER   |
-| `qwengr00t_mir_lora_libero.yaml`                | QwenGR00T    | LoRA            | MIR  |
-| `qwengr00t_mir_lora_libero_refresh50.yaml` ⭐    | QwenGR00T    | LoRA            | MIR  |
-| `qwengr00t_er_lora_robocasa_atomic10.yaml`      | QwenGR00T    | LoRA, Robocasa  | ER   |
-| `qwengr00t_mir_lora_robocasa_atomic10.yaml`     | QwenGR00T    | LoRA, Robocasa  | MIR  |
-| `qwengr00t_er_libero.yaml`                      | QwenGR00T    | Full-parameter  | ER   |
-| `neurovla_er_lora_libero.yaml`                  | NeuroVLA     | LoRA            | ER   |
-| `llamaoft_er_lora_libero.yaml`                  | LlamaOFT     | LoRA (r=16)     | ER   |
-| `paligemma_oft_er_libero.yaml`                  | PaliGemmaOFT | Full-parameter  | ER   |
+| Yaml                                          | Backbone     | Variant         | Algo | Stream             |
+|:----------------------------------------------|:-------------|:----------------|:-----|:-------------------|
+| `qwengr00t_er_lora_libero.yaml` (default)     | QwenGR00T    | LoRA (r=32)     | ER   | LIBERO-Goal        |
+| `qwengr00t_er_lora_libero_long.yaml`          | QwenGR00T    | LoRA            | ER   | LIBERO-Long (10)   |
+| `qwengr00t_mir_lora_libero.yaml`              | QwenGR00T    | LoRA            | MIR  | LIBERO-Goal        |
+| `qwengr00t_mir_lora_libero_refresh50.yaml`    | QwenGR00T    | LoRA            | MIR  | LIBERO-Goal (77%)  |
+| `qwengr00t_er_lora_robocasa_atomic10.yaml`    | QwenGR00T    | LoRA            | ER   | Robocasa-atomic10  |
+| `qwengr00t_mir_lora_robocasa_atomic10.yaml`   | QwenGR00T    | LoRA            | MIR  | Robocasa-atomic10  |
+| `qwengr00t_er_libero.yaml`                    | QwenGR00T    | Full-parameter  | ER   | LIBERO-Goal        |
+| `neurovla_er_lora_libero.yaml`                | NeuroVLA     | LoRA            | ER   | LIBERO-Goal        |
+| `llamaoft_er_lora_libero.yaml`                | LlamaOFT     | LoRA (r=16)     | ER   | LIBERO-Goal        |
+| `paligemma_oft_er_libero.yaml`                | PaliGemmaOFT | Full-parameter  | ER   | LIBERO-Goal        |
 
-⭐ = the 77 % LIBERO-Goal recipe (recommended).
+`qwengr00t_mir_lora_libero_refresh50.yaml` is the 77 % LIBERO-Goal recipe —
+buffer 1000, replay ratio 0.5, balanced sampling, MIR refresh every 50
+steps.  See [Reproduce the 77 % MIR recipe](#reproduce-the-77--mir-recipe-libero-goal-full-1010-matrix).
 
 **Algorithm selection** (in yaml):
 
 ```yaml
 continual_learning:
   algorithm:
-    name: er          # `er` | `mir`
+    name: er          # er | mir | ewc
     # method-specific knobs — see per-algorithm sections above
 ```
 
 ### `run_cl_eval.sh`
 
-| Flag                  | Description                                                                 | Default       |
-|:----------------------|:----------------------------------------------------------------------------|:--------------|
+Common flags:
+
+| Flag                  | Description                                                                  | Default       |
+|:----------------------|:-----------------------------------------------------------------------------|:--------------|
 | `--run-id ID`         | **Required.** Run directory under `results/Checkpoints/`.                    | —             |
-| `--base-config PATH`  | **Required for LoRA runs** — base yaml used to merge the adapter.           | —             |
-| `--gpus LIST`         | Comma-separated GPU id list; determines parallelism.                        | `0`           |
-| `--suite NAME`        | `libero_goal`, `libero_spatial`, `libero_object`, or `libero_10`.            | `libero_goal` |
-| `--trials N`          | Rollouts per task.                                                          | `10`          |
+| `--base-config PATH`  | **Required for LoRA runs** — base yaml used to merge the adapter.            | —             |
+| `--benchmark NAME`    | `libero` or `robocasa`.                                                      | `libero`      |
+| `--gpus LIST`         | Comma-separated GPU id list; determines parallelism.                         | `0`           |
 | `--port-base N`       | Starting port (each parallel worker gets `+i`).                              | `5694`        |
-| `--last-only`         | Evaluate only the final task checkpoint.                                    | off           |
+| `--output-base PATH`  | Eval results root.                                                           | `results/eval_cl/<run_id>` |
+| `--last-only`         | Evaluate only the final task checkpoint.                                     | off           |
+
+LIBERO-only flags (`--benchmark libero`):
+
+| Flag             | Description                                                                  | Default       |
+|:-----------------|:-----------------------------------------------------------------------------|:--------------|
+| `--suite NAME`   | `libero_goal`, `libero_spatial`, `libero_object`, or `libero_10`.            | `libero_goal` |
+| `--trials N`     | Rollouts per task (production = 50).                                         | `10`          |
+
+Robocasa-only flags (`--benchmark robocasa`):
+
+| Flag                | Description                                                                  | Default          |
+|:--------------------|:-----------------------------------------------------------------------------|:-----------------|
+| `--n-episodes N`    | Rollouts per task (production = 50).                                         | `20`             |
+| `--split NAME`      | `pretrain` (in-distribution) or `target` (OOD).                              | `pretrain`       |
+| `--n-envs N`        | Vectorised envs per task (raise to use spare VRAM for parallel rollouts).    | `1`              |
+| `--n-action-steps N`| Action chunk size returned per server call.                                  | `16`             |
 
 The evaluator automatically:
 
 1. Discovers every `task_*_lora_adapter/` or `task_*_pytorch_model.pt` under `<run_id>/checkpoints/`.
 2. Detects LoRA runs and merges adapters into full checkpoints on demand (cached as `*_merged.pt`).
 3. Parallelises across `--gpus` — each worker owns a dedicated policy server + port.
-4. Emits per-checkpoint `eval.log` + `server.log` under `results/eval_cl/<run_id>/<checkpoint_name>/`.
+4. Emits per-checkpoint `eval.log` + `server.log` under the output base; Robocasa additionally writes per-task `stats.json` and `aggregate_stats.json`.
 
 ---
 
