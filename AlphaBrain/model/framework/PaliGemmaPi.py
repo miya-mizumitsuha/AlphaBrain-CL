@@ -97,6 +97,10 @@ class PaliGemmaPi(BaseFramework):
             expert_type = expert_cfg.type
 
         self._tokenizer = None
+        try:
+            self._init_tokenizer()
+        except Exception as e:
+            logger.warning(f"[PaliGemmaPi] eager tokenizer init failed ({e}); will retry lazily on first call")
         self.flow_matching_head = Pi0FlowMatchingHead(
             action_dim=action_cfg.action_dim,
             action_horizon=action_cfg.action_horizon,
@@ -213,9 +217,13 @@ class PaliGemmaPi(BaseFramework):
         """Initialize PaliGemma tokenizer (HF AutoTokenizer or sentencepiece fallback)."""
         import os
         # Try HF tokenizer first (has proper special tokens)
-        # Optional local tokenizer cache via env var; falls back to HF hub
+        # Prefer local pretrained dir (project convention) before hitting HF hub,
+        # so offline/air-gapped servers don't stall on huggingface.co revalidation.
         _local_tok = os.environ.get("PALIGEMMA_TOKENIZER_PATH")
+        _pretrained_dir = os.environ.get("PRETRAINED_MODELS_DIR", "data/pretrained_models")
+        _local_pg = os.path.join(_pretrained_dir, "paligemma-3b-pt-224")
         tokenizer_dirs = ([_local_tok] if _local_tok else []) + [
+            _local_pg,
             "google/paligemma-3b-pt-224",
         ]
         for td in tokenizer_dirs:
