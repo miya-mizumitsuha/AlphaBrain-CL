@@ -36,22 +36,15 @@ if [ -f .env ]; then
 fi
 
 # ── 清理训练日志噪声 ─────────────────────────────────────────
-# DeepSpeed op_builder 探测时会刷屏 gcc 编译输出（aio / cuFile），训练时用不到
-export DS_BUILD_AIO="${DS_BUILD_AIO:-0}"
-export DS_BUILD_GDS="${DS_BUILD_GDS:-0}"
 # 关掉 albumentations 的版本检查弹窗
 export NO_ALBUMENTATIONS_UPDATE="${NO_ALBUMENTATIONS_UPDATE:-1}"
 # torchrun 默认会警告 OMP_NUM_THREADS 未设置，给个合理默认
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-8}"
-# PyTorch ≥2.2 把 NCCL_* 重命名为 TORCH_NCCL_*；如果用户在 .env 里设了旧名，自动迁移
-if [ -n "${NCCL_BLOCKING_WAIT:-}" ] && [ -z "${TORCH_NCCL_BLOCKING_WAIT:-}" ]; then
-    export TORCH_NCCL_BLOCKING_WAIT="$NCCL_BLOCKING_WAIT"
-    unset NCCL_BLOCKING_WAIT
-fi
-if [ -n "${NCCL_ASYNC_ERROR_HANDLING:-}" ] && [ -z "${TORCH_NCCL_ASYNC_ERROR_HANDLING:-}" ]; then
-    export TORCH_NCCL_ASYNC_ERROR_HANDLING="$NCCL_ASYNC_ERROR_HANDLING"
-    unset NCCL_ASYNC_ERROR_HANDLING
-fi
+# 注：DeepSpeed import 时会用 distutils.has_function 探测 libaio / libcufile，
+# 顺手把一坨 `gcc -pthread … compiler_compat …` 命令打到 stdout。DS_BUILD_AIO /
+# DS_BUILD_GDS 只能跳过 JIT 构建，并不会关掉这个 is_compatible 探测；这里用
+# 文末的 grep 过滤（在 tee 之前）一次性吃掉，pattern 同时含 gcc -pthread 和
+# conda 的 compiler_compat 目录，不会误伤用户输出。
 
 # 解析参数：
 #   bash scripts/run_finetune.sh qwen_oft                  → mode=qwen_oft, config=默认
@@ -225,4 +218,6 @@ python -m accelerate.commands.launch \
   --config_yaml "${CONFIG_FILE}" \
   --mode "${MODE}" \
   "${EXTRA_ARGS[@]}" \
-  2>&1 | tee "${TRAIN_LOG}"
+  2>&1 \
+  | grep --line-buffered -vE 'gcc -pthread .*compiler_compat' \
+  | tee "${TRAIN_LOG}"

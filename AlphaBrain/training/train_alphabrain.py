@@ -23,6 +23,12 @@ import numpy as np
 import time
 import re
 
+# Silence DeepSpeed op_builder gcc probes (libaio/cufile). distutils echoes the
+# compile/link commands to stdout via distutils.log; must lower the threshold
+# BEFORE importing accelerate/deepspeed, since the probe runs during import.
+import distutils.log as _distutils_log
+_distutils_log.set_threshold(_distutils_log.WARN)
+
 # Third-Party Libraries
 import torch
 import torch.distributed as dist
@@ -34,6 +40,14 @@ from accelerate.utils import set_seed
 from omegaconf import OmegaConf
 from tqdm import tqdm
 from transformers import AutoProcessor, get_scheduler
+
+# DeepSpeed registers its own logger named "DeepSpeed" (capital D) with a
+# StreamHandler at INFO. Lower BOTH the logger and its handler to WARNING to
+# kill the config dump and per-stage init messages.
+_ds_logger = logging.getLogger("DeepSpeed")
+_ds_logger.setLevel(logging.WARNING)
+for _h in _ds_logger.handlers:
+    _h.setLevel(logging.WARNING)
 
 # Local Modules
 from AlphaBrain.training.trainer_utils.trainer_tools import normalize_dotlist_args
@@ -67,10 +81,6 @@ def _build_accelerator(gradient_accumulation_steps: int = 1) -> Accelerator:
     acc.print(acc.state)
     return acc
 
-
-# Suppress DeepSpeed verbose INFO logs (config dump, optimizer init details, etc.)
-import logging as _logging
-_logging.getLogger("deepspeed").setLevel(_logging.WARNING)
 
 # Sane Defaults
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
