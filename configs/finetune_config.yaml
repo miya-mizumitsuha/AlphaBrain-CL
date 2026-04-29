@@ -392,6 +392,9 @@ modes:
     framework:
       paligemma:
         base_vlm: ${PRETRAINED_MODELS_DIR}/paligemma-3b-pt-224
+        # Only consumed by paths that call vlm_interface.model.forward (e.g. paligemma_oft).
+        # v3 trains via _shared_forward (manual joint Q/K/V) and infers via eager attention,
+        # so this flag is effectively dead — kept to mirror upstream yaml.
         attn_implementation: "flash_attention_2"
         discrete_state_input: false
       action_model:

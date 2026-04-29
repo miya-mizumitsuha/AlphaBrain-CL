@@ -207,8 +207,9 @@ class PaliGemmaPi(BaseFramework):
         # e.g. [true, true, true, true, true, true, true, false, ..., false]
         action_mask_cfg = getattr(config.framework.action_model, 'action_mask', None)
         if action_mask_cfg is not None:
-            self._action_dim_mask = torch.tensor(list(action_mask_cfg), dtype=torch.bool)
-            n_valid = self._action_dim_mask.sum().item()
+            mask_tensor = torch.tensor(list(action_mask_cfg), dtype=torch.bool)
+            self.register_buffer('_action_dim_mask', mask_tensor, persistent=False)
+            n_valid = mask_tensor.sum().item()
             logger.info(f"[action_mask] {n_valid}/{len(action_mask_cfg)} valid action dims (loss computed on valid dims only)")
         else:
             self._action_dim_mask = None
@@ -233,7 +234,8 @@ class PaliGemmaPi(BaseFramework):
                 self._tokenizer = None  # signal to use HF tokenizer
                 logger.info(f"[PaliGemmaPi] Loaded HF tokenizer from {td}")
                 return
-            except Exception:
+            except (OSError, ImportError, ValueError) as e:
+                logger.debug(f"[PaliGemmaPi] tokenizer load failed for {td}: {e}")
                 continue
 
         # Fallback: sentencepiece
@@ -470,21 +472,6 @@ class PaliGemmaPi(BaseFramework):
 
         return prefix_embs, prefix_pad_masks, prefix_att_masks
 
-    def _prepare_prefix_llama_raw(self, examples):
-        """
-        For LlamaPi0: run full VLM forward, get final hidden states, project to expert width.
-
-        Llama 3.2 Vision has mixed self-attention and cross-attention layers
-        (cross-attention layers process vision features). True layer-wise joint
-        attention is not feasible because cross-attention layers lack self_attn.
-
-        Instead, we run the full VLM, project the output, and feed it to the
-        action expert as prefix context. The action expert then does all 18 layers
-        of self-attention over [projected_prefix | action_suffix].
-        """
-        # This is the same as _prepare_prefix_generic — reuse it
-        return self._prepare_prefix_generic(examples)
-
     def _prepare_prefix_generic(self, examples):
         """
         Prepare prefix using Qwen/Llama VLM.
@@ -577,7 +564,7 @@ class PaliGemmaPi(BaseFramework):
         if framework_name == "LlamaPi0" and vlm_type == "llama":
             # LlamaPi0: Need VLM input embeddings (not full forward output)
             # because _shared_forward_llama handles layer-by-layer processing
-            prefix_embs_raw, prefix_pad_masks_raw, prefix_att_masks_raw = self._prepare_prefix_llama_raw(examples)
+            prefix_embs_raw, prefix_pad_masks_raw, prefix_att_masks_raw = self._prepare_prefix_generic(examples)
             vlm_lm = self._get_vlm_language_model()
             loss = self.flow_matching_head.compute_loss_llama(
                 prefix_embs=prefix_embs_raw,
@@ -611,8 +598,7 @@ class PaliGemmaPi(BaseFramework):
         # Apply action mask: only compute loss on valid dims (e.g. first 7 of 32)
         # loss shape: [B, horizon, action_dim]
         if hasattr(self, '_action_dim_mask') and self._action_dim_mask is not None:
-            mask = self._action_dim_mask.to(loss.device)  # [action_dim]
-            loss = loss[:, :, mask]  # [B, horizon, num_valid_dims]
+            loss = loss[:, :, self._action_dim_mask]  # [B, horizon, num_valid_dims]
 
         loss_mean = loss.mean()
         return {"action_loss": loss_mean, "flow_matching_loss": loss_mean.item()}
@@ -715,7 +701,8 @@ class PaliGemmaPi(BaseFramework):
         if self._tokenizer is None and not hasattr(self, '_hf_tokenizer'):
             self._init_tokenizer()
 
-        _PREDICT_MAX_LEN = 200  # match openpi PaligemmaTokenizer default
+        paligemma_cfg = getattr(self.config.framework, 'paligemma', None)
+        _PREDICT_MAX_LEN = getattr(paligemma_cfg, 'max_token_len', 48) if paligemma_cfg is not None else 48
 
         def _tokenize_openpi_style(text, max_len=_PREDICT_MAX_LEN):
             """Tokenize text in openpi PaligemmaTokenizer format: BOS + cleaned_text + newline, padded to max_len."""
@@ -777,114 +764,16 @@ class PaliGemmaPi(BaseFramework):
         att_tensor = torch.tensor(att_list, dtype=torch.bool, device=device)
         prefix_att_masks = att_tensor[None, :].expand(bsize, -1)
 
-        # DEBUG: log prefix stats for comparison with openpi
-        if not hasattr(self, '_debug_count'):
-            self._debug_count = 0
-        if self._debug_count < 3:
-            # Log image info from examples
-            ex0 = examples[0]
-            img0 = ex0['image']
-            if isinstance(img0, list):
-                for vi, v in enumerate(img0):
-                    import numpy as np
-                    if isinstance(v, np.ndarray):
-                        print(f"[DEBUG] image[{vi}]: type=ndarray, dtype={v.dtype}, shape={v.shape}, range=[{v.min()}, {v.max()}]")
-                    elif isinstance(v, torch.Tensor):
-                        print(f"[DEBUG] image[{vi}]: type=tensor, dtype={v.dtype}, shape={v.shape}, range=[{v.min()}, {v.max()}]")
-                    else:
-                        print(f"[DEBUG] image[{vi}]: type={type(v)}")
-            print(f"[DEBUG] prefix shape={prefix_embs.shape}, "
-                  f"mean={prefix_embs.float().mean():.6f}, std={prefix_embs.float().std():.6f}, "
-                  f"img[0:4]={prefix_embs[0,0,:4].float().cpu().tolist()}, "
-                  f"lang[768:772]={prefix_embs[0,768,:4].float().cpu().tolist()}")
-            import sys; sys.stdout.flush(); sys.stderr.flush()
-            self._debug_count += 1
-
         vlm_lm = self._get_vlm_language_model()
 
-        # Use openpi-style KV cache inference directly (proven to work in AB test)
-        from AlphaBrain.model.modules.action_model.pi0_flow_matching_head.openpi_inference import make_att_2d_masks
-        from transformers.models.gemma import modeling_gemma
-
-        bsize = prefix_pad_masks.shape[0]
-
-        # Step 1: prefix → KV cache through VLM language model
-        prefix_att_2d = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
-        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
-        prefix_att_4d = prefix_att_2d[:, None, :, :]
-        prefix_att_4d = torch.where(prefix_att_4d, 0.0, -2.3819763e38)
-
-        vlm_lm.config._attn_implementation = "eager"
-        prefix_output = vlm_lm.forward(
-            inputs_embeds=prefix_embs,
-            attention_mask=prefix_att_4d,
-            position_ids=prefix_position_ids,
-            past_key_values=None,
-            use_cache=True,
+        actions = self.flow_matching_head.sample_actions(
+            prefix_embs=prefix_embs,
+            prefix_pad_masks=prefix_pad_masks,
+            prefix_att_masks=prefix_att_masks,
+            vlm_language_model=vlm_lm,
+            state=state,
+            device=device,
         )
-        past_key_values = prefix_output.past_key_values
-        # For transformers >= 4.45: DynamicCache accumulates K,V across denoising steps.
-        # Convert to legacy tuple format so we can recreate a fresh cache each step.
-        if hasattr(past_key_values, 'to_legacy_cache'):
-            _vlm_kv_legacy = past_key_values.to_legacy_cache()
-            _use_dynamic_cache = True
-        else:
-            _use_dynamic_cache = False
-
-        # Step 2: iterative denoising through action expert
-        expert_model = self.flow_matching_head.action_expert.model.model
-        num_steps = self.flow_matching_head.num_inference_steps
-        dt = -1.0 / num_steps
-        dt_t = torch.tensor(dt, dtype=torch.float32, device=device)
-
-        noise = torch.randn(bsize, self.action_horizon, self.action_dim, dtype=torch.float32, device=device)
-        x_t = noise
-        time = torch.tensor(1.0, dtype=torch.float32, device=device)
-
-        while time >= -dt_t / 2:
-            expanded_time = time.expand(bsize)
-            suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.flow_matching_head.embed_suffix(
-                state, x_t, expanded_time
-            )
-
-            suffix_len = suffix_pad_masks.shape[1]
-            prefix_len = prefix_pad_masks.shape[1]
-
-            prefix_pad_2d = prefix_pad_masks[:, None, :].expand(bsize, suffix_len, prefix_len)
-            suffix_att_2d = make_att_2d_masks(suffix_pad_masks, suffix_att_masks)
-            full_att_2d = torch.cat([prefix_pad_2d, suffix_att_2d], dim=2)
-            full_att_4d = full_att_2d[:, None, :, :]
-            full_att_4d = torch.where(full_att_4d, 0.0, -2.3819763e38)
-
-            prefix_offsets = torch.sum(prefix_pad_masks, dim=-1)[:, None]
-            suffix_position_ids = prefix_offsets + torch.cumsum(suffix_pad_masks, dim=1) - 1
-
-            expert_model.config._attn_implementation = "eager"
-            # Rebuild fresh DynamicCache each step: prevents expert K,V from
-            # accumulating across denoising steps (DynamicCache is stateful in 4.45+).
-            if _use_dynamic_cache:
-                from transformers import DynamicCache
-                _kv_for_step = DynamicCache.from_legacy_cache(_vlm_kv_legacy)
-            else:
-                _kv_for_step = past_key_values
-            suffix_output = expert_model.forward(
-                inputs_embeds=suffix_embs,
-                attention_mask=full_att_4d,
-                position_ids=suffix_position_ids,
-                past_key_values=_kv_for_step,
-                use_cache=False,
-                adarms_cond=adarms_cond,
-            )
-
-            suffix_out = suffix_output.last_hidden_state
-            suffix_out = suffix_out[:, -self.action_horizon:]
-            suffix_out = suffix_out.to(dtype=torch.float32)
-            v_t = self.flow_matching_head.action_out_proj(suffix_out)
-
-            x_t = x_t + dt_t * v_t
-            time = time + dt_t
-
-        actions = x_t
 
         # Unnormalize actions if MEAN_STD normalization was used
         if self.use_action_norm:

@@ -494,6 +494,15 @@ class Pi0FlowMatchingHead(nn.Module):
             adarms_cond=None,  # VLM doesn't use adaRMS
         )
         past_key_values = prefix_output.past_key_values
+        # transformers >= 4.45 returns a stateful DynamicCache. Snapshot the
+        # prefix K,V as legacy tuples so each denoise step can run against a
+        # fresh cache instead of polluting the prefix with expert K,V.
+        if hasattr(past_key_values, "to_legacy_cache"):
+            prefix_kv_legacy = past_key_values.to_legacy_cache()
+            use_dynamic_cache = True
+        else:
+            prefix_kv_legacy = None
+            use_dynamic_cache = False
 
         # ── Step 2: Iterative denoising with KV cache ──
         dt = -1.0 / num_steps
@@ -502,7 +511,8 @@ class Pi0FlowMatchingHead(nn.Module):
         time = torch.tensor(1.0, dtype=torch.float32, device=device)
 
         # Force eager attention on action expert
-        self.action_expert.model.model.config._attn_implementation = "eager"
+        expert_model = self.action_expert.model.model
+        expert_model.config._attn_implementation = "eager"
 
         while time >= -dt / 2:
             expanded_time = time.expand(bsize)
@@ -525,27 +535,33 @@ class Pi0FlowMatchingHead(nn.Module):
             prefix_offsets = torch.sum(prefix_pad_masks, dim=-1)[:, None]
             suffix_position_ids = prefix_offsets + torch.cumsum(suffix_pad_masks, dim=1) - 1
 
-            # Run suffix through action expert with prefix KV cache
-            # Use standard GemmaModel.forward which handles KV cache natively
-            expert_model = self.action_expert.model.model
-            expert_model.config._attn_implementation = "eager"
+            # Run suffix through action expert with prefix KV cache.
+            # Rebuild a fresh DynamicCache from the legacy prefix snapshot each
+            # step so expert K,V from prior steps don't accumulate into it.
+            if use_dynamic_cache:
+                from transformers import DynamicCache
+                kv_for_step = DynamicCache.from_legacy_cache(prefix_kv_legacy)
+            else:
+                kv_for_step = past_key_values
 
             expert_output = expert_model(
                 inputs_embeds=suffix_embs,
                 attention_mask=full_att_4d,
                 position_ids=suffix_position_ids,
-                past_key_values=past_key_values,
+                past_key_values=kv_for_step,
                 use_cache=False,
                 adarms_cond=adarms_cond,
             )
             suffix_out = expert_output.last_hidden_state
 
-            # Extract action tokens and project
+            # Extract action tokens and project. Keep float32 throughout the
+            # denoise update — matches openpi's precision control and the
+            # sibling sample_actions_prefix_cache path.
             suffix_out = suffix_out[:, -self.action_horizon:]
             suffix_out = suffix_out.to(dtype=torch.float32)
             v_t = self.action_out_proj(suffix_out)
 
-            x_t = x_t + dt * v_t.to(dtype=model_dtype)
+            x_t = x_t + dt * v_t
             time = time + dt
 
         return x_t
@@ -706,6 +722,8 @@ class Pi0FlowMatchingHead(nn.Module):
                 v = torch.cat(value_states, dim=2)
 
                 dummy = torch.zeros(q.shape[0], q.shape[2], q.shape[-1], device=q.device, dtype=q.dtype)
+                # CRITICAL: must use VLM's rotary_emb for both prefix and suffix — expert RoPE config
+                # (max_position_embeddings, rope_scaling) may differ; sharing keeps training/inference aligned.
                 cos, sin = vlm_language_model.rotary_emb(dummy, position_ids)
                 q, k = modeling_gemma.apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=1)
 
@@ -715,7 +733,7 @@ class Pi0FlowMatchingHead(nn.Module):
                 )
 
                 head_dim = vlm_language_model.layers[layer_idx].self_attn.head_dim
-                att_output = att_output.reshape(q.shape[0], -1, 1 * 8 * head_dim)
+                att_output = att_output.reshape(q.shape[0], -1, q.shape[1] * head_dim)
 
                 # Split back and apply per-model FFN
                 outputs = []
@@ -756,143 +774,6 @@ class Pi0FlowMatchingHead(nn.Module):
             outputs.append(out)
 
         return outputs[1]  # Return suffix output only
-
-    def _compute_prefix_cache(self, vlm_language_model, prefix_embs, attention_mask, position_ids):
-        """Compute KV cache from VLM prefix.
-
-        Runs VLM's language model forward on prefix tokens to produce KV cache
-        that will be reused across all denoising steps.
-
-        Returns:
-            list of (key, value) tuples per layer, each [B, num_kv_heads, prefix_len, head_dim]
-        """
-        vlm_language_model.config._attn_implementation = "eager"
-
-        # Use VLM forward to get KV cache
-        # We pass through the VLM's language model (Gemma) which produces prefix representations
-        output = vlm_language_model.forward(
-            inputs_embeds=prefix_embs,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-            past_key_values=None,
-            use_cache=True,
-        )
-
-        # Extract KV cache as list of (key, value) tuples
-        past_kv = output.past_key_values
-        kv_cache = []
-        for layer_idx in range(len(past_kv)):
-            keys, values = past_kv[layer_idx]
-            kv_cache.append((keys, values))
-
-        return kv_cache
-
-    def _denoise_step(self, state, prefix_pad_masks, past_key_values, x_t, timestep):
-        """Single denoising step with manual layer iteration.
-
-        Manually iterates through action expert layers, computing attention
-        with VLM's prefix KV cache. This avoids dependency on transformers'
-        standard GemmaModel.forward which has incompatible mask/cache handling.
-
-        Architecture follows openpi's approach:
-        - Q comes from suffix (action) tokens
-        - K,V come from prefix (VLM cache) + suffix
-        - adaRMS conditioning applied to expert's layernorms
-        """
-        from transformers.models.gemma.modeling_gemma import apply_rotary_pos_emb
-
-        suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.embed_suffix(state, x_t, timestep)
-
-        suffix_len = suffix_pad_masks.shape[1]
-        batch_size = prefix_pad_masks.shape[0]
-        prefix_len = prefix_pad_masks.shape[1]
-        device = suffix_embs.device
-
-        # Build full attention mask: suffix tokens attend to prefix (via KV cache) + suffix
-        prefix_pad_2d = prefix_pad_masks[:, None, :].expand(batch_size, suffix_len, prefix_len)
-        suffix_att_2d = make_att_2d_masks(suffix_pad_masks, suffix_att_masks)
-        full_att_2d = torch.cat([prefix_pad_2d, suffix_att_2d], dim=2)
-        # Convert to 4D additive mask: [B, 1, suffix_len, prefix_len + suffix_len]
-        full_att_4d = full_att_2d[:, None, :, :]
-        full_att_4d = torch.where(full_att_4d, 0.0, -2.3819763e38).to(dtype=suffix_embs.dtype)
-
-        # Position IDs: continue from prefix length
-        prefix_offsets = torch.sum(prefix_pad_masks, dim=-1)[:, None]
-        position_ids = prefix_offsets + torch.cumsum(suffix_pad_masks, dim=1) - 1
-
-        # Get action expert's inner GemmaModel
-        expert_model = self.action_expert.model.model
-
-        # Initial embedding scaling (Gemma convention)
-        hidden_states = suffix_embs
-        normalizer = torch.tensor(expert_model.config.hidden_size ** 0.5, dtype=hidden_states.dtype, device=device)
-        hidden_states = hidden_states * normalizer
-
-        # Compute rotary embeddings for suffix positions
-        # CRITICAL: use VLM's rotary_emb to match training (_shared_forward uses VLM rotary)
-        vlm_rotary = self._vlm_rotary_emb if hasattr(self, '_vlm_rotary_emb') else expert_model.rotary_emb
-        position_embeddings = vlm_rotary(hidden_states, position_ids)
-        cos, sin = position_embeddings
-
-        # Iterate through action expert decoder layers
-        for layer_idx, decoder_layer in enumerate(expert_model.layers):
-            residual = hidden_states
-
-            # Input layernorm with adaRMS conditioning
-            hidden_states, gate = decoder_layer.input_layernorm(hidden_states, cond=adarms_cond)
-
-            # Self attention: Q from suffix, K/V from prefix cache + suffix
-            input_shape = hidden_states.shape[:-1]
-            head_dim = decoder_layer.self_attn.head_dim
-            hidden_shape = (*input_shape, -1, head_dim)
-
-            query_states = decoder_layer.self_attn.q_proj(hidden_states).view(hidden_shape).transpose(1, 2)
-            key_states = decoder_layer.self_attn.k_proj(hidden_states).view(hidden_shape).transpose(1, 2)
-            value_states = decoder_layer.self_attn.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
-
-            # Apply rotary position embeddings
-            query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-
-            # Concatenate with prefix KV cache from VLM
-            if past_key_values is not None and layer_idx < len(past_key_values):
-                past_key, past_value = past_key_values[layer_idx]
-                key_states = torch.cat([past_key.to(key_states.dtype), key_states], dim=2)
-                value_states = torch.cat([past_value.to(value_states.dtype), value_states], dim=2)
-
-            # Compute scaled dot-product attention
-            scaling = decoder_layer.self_attn.scaling
-            attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) * scaling
-            attn_weights = attn_weights + full_att_4d
-            attn_weights = torch.nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32)
-            attn_weights = attn_weights.to(query_states.dtype)
-            attn_output = torch.matmul(attn_weights, value_states)
-
-            # Reshape and project
-            attn_output = attn_output.transpose(1, 2).reshape(*input_shape, -1)
-            attn_output = decoder_layer.self_attn.o_proj(attn_output)
-
-            # Gated residual connection
-            if gate is not None:
-                hidden_states = residual + gate.to(attn_output.dtype) * attn_output
-            else:
-                hidden_states = residual + attn_output
-
-            # Post-attention: layernorm + MLP + gated residual
-            residual = hidden_states
-            hidden_states, gate = decoder_layer.post_attention_layernorm(hidden_states, cond=adarms_cond)
-            hidden_states = decoder_layer.mlp(hidden_states)
-            if gate is not None:
-                hidden_states = residual + gate.to(hidden_states.dtype) * hidden_states
-            else:
-                hidden_states = residual + hidden_states
-
-        # Final norm with adaRMS
-        hidden_states, _ = expert_model.norm(hidden_states, cond=adarms_cond)
-
-        # Extract action tokens and project to action space
-        suffix_out = hidden_states[:, -self.action_horizon:]
-        suffix_out = suffix_out.float()
-        return self.action_out_proj(suffix_out)
 
     def _shared_forward_llama(
         self,
