@@ -1,9 +1,8 @@
 # Continual Learning
 
-Train a single VLA backbone sequentially over a stream of manipulation tasks
-(LIBERO suites or Robocasa-atomic10), with a pluggable family of CL
-algorithms (ER / MIR / EWC) selectable from YAML.  Supports 4 architectures
-× LoRA / full-parameter.
+Train a single VLA backbone sequentially over the four LIBERO task
+suites with a pluggable family of CL algorithms (ER / MIR / EWC)
+selectable from YAML.  Supports 4 architectures × LoRA / full-parameter.
 
 ---
 
@@ -16,8 +15,7 @@ vim .env           # fill in paths below
 ```
 
 Required env vars: `PRETRAINED_MODELS_DIR`, `LEROBOT_LIBERO_DATA_DIR`,
-`LIBERO_PYTHON`, `LIBERO_HOME`.  For Robocasa-atomic10 also set
-`ROBOCASA365_DATA_DIR` and `ROBOCASA365_PYTHON`.
+`LIBERO_PYTHON`, `LIBERO_HOME`.
 
 ---
 
@@ -35,9 +33,9 @@ bash scripts/run_continual_learning_scripts/run_cl_train.sh \
     --yaml configs/continual_learning/qwengr00t_mir_lora_libero_refresh50.yaml \
     --gpus 0,1,2,3
 
-# Switch benchmark (Robocasa-atomic10 + ER)
+# Switch suite (LIBERO-Long with ER)
 bash scripts/run_continual_learning_scripts/run_cl_train.sh \
-    --yaml configs/continual_learning/qwengr00t_er_lora_robocasa_atomic10.yaml
+    --yaml configs/continual_learning/qwengr00t_er_lora_libero_long.yaml
 
 # Switch backbone (NeuroVLA + LoRA + ER on LIBERO-Goal)
 bash scripts/run_continual_learning_scripts/run_cl_train.sh \
@@ -55,13 +53,6 @@ bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
     --run-id qwengr00t_er_lora_libero_goal_v1 \
     --base-config configs/continual_learning/qwengr00t_er_lora_libero.yaml \
     --gpus 0,1 --trials 50
-
-# Robocasa-atomic10
-bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
-    --benchmark robocasa \
-    --run-id qwengr00t_er_lora_robocasa_atomic10_v1 \
-    --base-config configs/continual_learning/qwengr00t_er_lora_robocasa_atomic10.yaml \
-    --gpus 0 --n-episodes 50 --last-only
 
 # Full-param run (no LoRA merge)
 bash scripts/run_continual_learning_scripts/run_cl_eval.sh \

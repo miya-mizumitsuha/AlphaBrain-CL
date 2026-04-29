@@ -97,9 +97,9 @@ selectable from YAML — no code edits needed to switch methods:
   Retrieval, NeurIPS 2019) ship in-tree; both inherit a common
   `CLAlgorithm` hook interface (`observe`, `modify_batch`,
   `compute_penalty`, `after_backward`, `on_task_start`, `on_task_end`).
-- **Benchmarks** — `LIBERO-{Spatial,Object,Goal,Long}` and
-  `Robocasa-atomic10` (10 atomic kitchen tasks) ship as first-class CL
-  streams; arbitrary LeRobot-format mixtures supported via YAML.
+- **Benchmarks** — `LIBERO-{Spatial,Object,Goal,Long}` ship as
+  first-class CL streams; arbitrary LeRobot-format mixtures supported
+  via YAML.
 - **Metrics** — one-command aggregator emits **ASR / BWT (Lopez-Paz &
   Ranzato 2017) / F (Chaudhry et al. 2018)** from a T×T evaluation
   matrix: `python scripts/run_continual_learning_scripts/compute_cl_matrix_metrics.py <matrix_dir>`.
