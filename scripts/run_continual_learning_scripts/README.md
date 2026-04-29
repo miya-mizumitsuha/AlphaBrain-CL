@@ -163,8 +163,8 @@ final-checkpoint matrix eval.
 |:-----------------------------|:---------------:|:-----------:|:-----------------:|
 |                              | ASR / BWT (pp)  | ASR         | ASR               |
 | Sequential FT                | 9.8 / —         | —           | —                 |
-| ER (aligned, buf=1000)       | ~52 / —         | 16.0        | —                 |
-| **MIR (refresh50 recipe)**   | **77.0 / −7.8** | **30.0**    | —                 |
+| ER (aligned, buf=1000)       | ~52 / —         | 16.0        | 2.2               |
+| **MIR (refresh50 / widepool)** | **77.0 / −7.8** | **30.0**  | **3.5**           |
 
 </div>
 
