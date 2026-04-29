@@ -9,7 +9,7 @@ Usage
 Auto-detect from a finetune_config mode (used by ``scripts/run_finetune.sh``)::
 
     python scripts/download_pretrained.py --config configs/finetune_config.yaml \
-        --mode paligemma_pi0_openpi_aligned_v3
+        --mode paligemma_pi05_openpi_aligned_v3
 
 Explicit list (manual prefetch)::
 

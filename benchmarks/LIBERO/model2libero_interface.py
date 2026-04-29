@@ -83,7 +83,7 @@ class M1Inference:
         # "normalized_actions"; skip client-side unnormalization to avoid double-unnorm.
         self.skip_client_unnorm = False
         self.invert_gripper_after_unnorm = False  # Pi0/Pi0.5 without internal norm needs gripper invert
-        _PI0_FAMILY = ('PaliGemmaPi0', 'PaliGemmaPi05', 'LlamaPi0', 'LlamaPi05', 'Pi0OFT')
+        _PI0_FAMILY = ('PaliGemmaPi05', 'LlamaPi05', 'Pi0OFT')
         try:
             from AlphaBrain.model.framework.config_utils import read_mode_config
             _mc, _ = read_mode_config(Path(policy_ckpt_path))
@@ -307,7 +307,7 @@ class M1Inference:
         See primary _check_unnorm_key above.
         """
         if len(norm_stats) == 0:
-            # Models with internal normalization (Pi0/LlamaPi0) may have no
+            # Models with internal normalization (Pi0.5) may have no
             # dataset_statistics.json.  Return a sentinel key so downstream
             # code can proceed; the stats will be ignored when
             # skip_client_unnorm is True.

@@ -69,9 +69,8 @@ def build_framework(cfg):
     elif cfg.framework.name == "PaliGemmaOFT":
         from AlphaBrain.model.framework.PaliGemmaOFT import PaliGemma_OFT
         return PaliGemma_OFT(cfg)
-    elif cfg.framework.name in ("PaliGemmaPi05", "PaliGemmaPi0", "LlamaPi0", "LlamaPi05"):
-        # Unified Pi0 / Pi0.5 framework. The `pi05` flag in config selects the
-        # algorithm variant; the registry name only picks defaults (e.g.
+    elif cfg.framework.name in ("PaliGemmaPi05", "LlamaPi05"):
+        # Pi0.5 framework. The registry name only picks defaults (e.g.
         # gripper_remap defaults to true under "PaliGemmaPi05").
         from AlphaBrain.model.framework.PaliGemmaPi import PaliGemmaPi
         return PaliGemmaPi(cfg)

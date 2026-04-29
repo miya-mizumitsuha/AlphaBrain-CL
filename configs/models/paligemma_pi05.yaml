@@ -1,8 +1,8 @@
-# PaliGemmaPi0 框架配置 (Pi0 flow matching with action expert)
+# PaliGemmaPi05 框架配置 (Pi0.5 flow matching with action expert)
 # PaliGemma VLM + Gemma action expert + flow matching denoising
 
 framework:
-  name: PaliGemmaPi0
+  name: PaliGemmaPi05
   pi05: true  # π₀.₅ mode: adaRMS timestep conditioning
 
   # ── VLM Backbone ──

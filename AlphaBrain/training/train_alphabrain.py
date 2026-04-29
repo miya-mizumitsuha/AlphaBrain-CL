@@ -394,7 +394,7 @@ class VLATrainer(TrainerUtils):
         generic loader matches 0/N keys; `load_pi0_weights` knows the mapping.
         """
         framework_name = getattr(self.config.framework, "name", "")
-        is_pi_family = framework_name in ("PaliGemmaPi0", "PaliGemmaPi05", "LlamaPi0", "LlamaPi05")
+        is_pi_family = framework_name in ("PaliGemmaPi05", "LlamaPi05")
 
         # Partial-module reload uses path-based key matching — generic loader only.
         if reload_modules or not is_pi_family:

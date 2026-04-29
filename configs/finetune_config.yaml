@@ -350,11 +350,11 @@ modes:
   # openpi official: BS=256, 30k steps → 7.68M samples
   # Ours: per_device=64, 4 GPU, acc=1 → effective BS=256, 60k steps → 15.36M
   # --------------------------------------------------------------------------
-  paligemma_pi0_openpi_aligned_v3:
-    model: paligemma_pi0
+  paligemma_pi05_openpi_aligned_v3:
+    model: paligemma_pi05
     num_gpus: 4
     main_process_port: 29510
-    run_id: "paligemma_pi0_openpi_aligned_v3"
+    run_id: "paligemma_pi05"
     wandb_project: "vla-engine-benchmark"
     wandb_base_url: "https://api.bandw.top"
     framework_name: "PaliGemmaPi05"
@@ -434,21 +434,10 @@ modes:
     use_bf16: true
 
   # --------------------------------------------------------------------------
-  # PaliGemmaPi05 v2 eval
-  paligemma_pi0_v2_goal_eval:
+  # PaliGemmaPi05 eval — final_model on all 4 LIBERO suites
+  paligemma_pi05_eval:
     type: "eval"
-    checkpoint: "./results/training/paligemma_pi0_openpi_aligned_v2/final_model"
-    task_suite: "libero_goal"
-    num_trials: 10
-    host: "127.0.0.1"
-    port: 5790
-    gpu_id: 0
-    use_bf16: true
-
-  # PaliGemmaPi05 v3 eval — final_model on all 4 LIBERO suites
-  paligemma_pi0_v3_libero_all_eval:
-    type: "eval"
-    checkpoint: "./results/training/paligemma_pi0_openpi_aligned_v3/final_model"
+    checkpoint: "./results/training/paligemma_pi05/final_model"
     task_suite: "libero_all"
     num_trials: 10
     host: "127.0.0.1"

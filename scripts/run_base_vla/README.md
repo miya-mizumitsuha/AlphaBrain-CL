@@ -23,7 +23,7 @@ Unified training & evaluation pipeline for the three base VLA frameworks in Alph
 ### Switching Framework (Action Head)
 
 - **OFT (DiT regression)**: Use modes with `_oft_` in the name
-- **Pi0.5 (flow matching)**: Use modes with `_pi0_` in the name
+- **Pi0.5 (flow matching)**: Use modes with `_pi05_` in the name
 
 ---
 
@@ -94,7 +94,7 @@ This is fully automatic — no manual flags needed. Just point to the checkpoint
 # ── Multi-task (libero_all) ──────────────────────────────────
 
 # PaliGemmaPi05: 4 GPU, BS=256, 60k steps (aligned with OpenPi official)
-bash scripts/run_base_vla/train.sh paligemma_pi0_openpi_aligned_v3
+bash scripts/run_base_vla/train.sh paligemma_pi05_openpi_aligned_v3
 
 # PaliGemmaOFT: 4 GPU, BS=128, 150k steps
 bash scripts/run_base_vla/train.sh paligemma_oft_all_150k
@@ -120,8 +120,8 @@ bash scripts/run_base_vla/train.sh llama_oft_long
 ### Evaluation
 
 ```bash
-# PaliGemmaPi05 eval (aligned_v2 checkpoint)
-bash scripts/run_base_vla/eval.sh paligemma_pi0_v2_goal_eval
+# PaliGemmaPi05 eval
+bash scripts/run_base_vla/eval.sh paligemma_pi05_eval
 
 # PaliGemmaOFT eval
 bash scripts/run_base_vla/eval.sh paligemma_oft_eval
@@ -144,7 +144,7 @@ bash scripts/run_base_vla/eval.sh llama_oft_eval
 
 | Mode | Framework | GPUs | Effective BS | Steps | Notes |
 |:-----|:----------|:-----|:-------------|:------|:------|
-| `paligemma_pi0_openpi_aligned_v3` | PaliGemmaPi05 | 4 | 256 (32×4, acc=2) | 60k | Aligned with OpenPi official; no EMA |
+| `paligemma_pi05_openpi_aligned_v3` | PaliGemmaPi05 | 4 | 256 (32×4, acc=2) | 60k | Aligned with OpenPi official; no EMA |
 | `paligemma_oft_all_150k` | PaliGemmaOFT | 4 | 128 (32×4, acc=1) | 150k | LR 2.4e-4 base, 8e-4 action |
 | `llama_oft_all_150k` | LlamaOFT | 4 | 128 (4×4, acc=8) | 1.2M | LM frozen; LR 2.4e-4 base |
 
@@ -157,7 +157,7 @@ bash scripts/run_base_vla/eval.sh llama_oft_eval
 | libero_object | `paligemma_oft_object` | `llama_oft_object` |
 | libero_long (10) | `paligemma_oft_long` | `llama_oft_long` |
 
-> **Note**: PaliGemmaPi05 currently only has a multi-task mode (`paligemma_pi0_openpi_aligned_v3`). To add single-task Pi05 modes, define new entries in `configs/finetune_config.yaml` with the desired `dataset_mix`.
+> **Note**: PaliGemmaPi05 currently only has a multi-task mode (`paligemma_pi05_openpi_aligned_v3`). To add single-task Pi05 modes, define new entries in `configs/finetune_config.yaml` with the desired `dataset_mix`.
 
 ### How to Switch Between libero_all and Single-task
 
@@ -167,7 +167,7 @@ Simply choose the corresponding mode name. Multi-task modes use `dataset_mix: "l
 
 | Mode | Framework | Checkpoint | Benchmark |
 |:-----|:----------|:-----------|:----------|
-| `paligemma_pi0_v2_goal_eval` | PaliGemmaPi05 | aligned_v2 final_model | libero_goal |
+| `paligemma_pi05_eval` | PaliGemmaPi05 | final_model | libero_all |
 | `paligemma_oft_eval` | PaliGemmaOFT | custom | libero_goal |
 | `paligemma_oft_mlp_goal30k_eval` | PaliGemmaOFT | mlp_goal_30k | libero_goal |
 | `paligemma_oft_mlp_long50k_eval` | PaliGemmaOFT | mlp_long_50k | libero_10 |
@@ -201,6 +201,6 @@ All other hyper-parameters (LR, batch size, DeepSpeed config, dataset paths…) 
 | PaliGemmaPi framework | `AlphaBrain/model/framework/PaliGemmaPi.py` |
 | LlamaOFT framework | `AlphaBrain/model/framework/LlamaOFT.py` |
 | Config (mode router) | `configs/finetune_config.yaml` |
-| Model architecture defaults | `configs/models/paligemma_oft.yaml`, `configs/models/paligemma_pi0.yaml`, `configs/models/llama_oft.yaml` |
+| Model architecture defaults | `configs/models/paligemma_oft.yaml`, `configs/models/paligemma_pi05.yaml`, `configs/models/llama_oft.yaml` |
 | Training entrypoint | `AlphaBrain/training/train_alphabrain.py` |
 | Eval entrypoint | `AlphaBrain/evaluation/` |

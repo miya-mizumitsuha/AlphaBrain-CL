@@ -4,12 +4,10 @@
 """
 PaliGemmaPi Framework
 
-Unified π₀ / π₀.₅ flow matching framework. The same class supports both
-algorithm modes (`framework.pi05: true|false`) and multiple VLM backbones
-(PaliGemma / Llama / Qwen). Registered under four legacy names for
-config compatibility:
+π₀.₅ flow matching framework with swappable VLM backbone (PaliGemma / Llama /
+Qwen). Registered under two names for config compatibility:
 
-    PaliGemmaPi0  PaliGemmaPi05  LlamaPi0  LlamaPi05
+    PaliGemmaPi05  LlamaPi05
 
 Architecture:
   VLM (any) → prefix embedding → [KV cache] → Action Expert (Gemma) + Flow Matching → actions
@@ -41,17 +39,15 @@ logger = logging.getLogger(__name__)
 IGNORE_INDEX = -100
 
 
-@FRAMEWORK_REGISTRY.register("PaliGemmaPi0")
 @FRAMEWORK_REGISTRY.register("PaliGemmaPi05")
-@FRAMEWORK_REGISTRY.register("LlamaPi0")
 @FRAMEWORK_REGISTRY.register("LlamaPi05")
 class PaliGemmaPi(BaseFramework):
     """
-    Unified Pi0 / Pi0.5 framework with swappable VLM backbone.
+    Pi0.5 framework with swappable VLM backbone.
 
     Config structure:
         framework:
-          name: PaliGemmaPi05            # or PaliGemmaPi0 / LlamaPi0 / LlamaPi05
+          name: PaliGemmaPi05            # or LlamaPi05
           pi05: true                     # true for π₀.₅, false for π₀
           gripper_remap: false           # optional; defaults to true when name=="PaliGemmaPi05"
           paligemma:                     # or qwenvl/llamavl — uses get_vlm_model()
@@ -89,13 +85,6 @@ class PaliGemmaPi(BaseFramework):
         expert_cfg = config.framework.action_expert
         action_cfg = config.framework.action_model
 
-        # Determine expert type based on framework name and config
-        expert_type = "gemma"  # default
-        if config.framework.name == "LlamaPi0":
-            expert_type = "llama"
-        elif hasattr(expert_cfg, 'type'):
-            expert_type = expert_cfg.type
-
         self._tokenizer = None
         try:
             self._init_tokenizer()
@@ -107,15 +96,14 @@ class PaliGemmaPi(BaseFramework):
             action_expert_width=getattr(expert_cfg, 'width', 1024),
             action_expert_depth=getattr(expert_cfg, 'depth', 18),
             action_expert_mlp_dim=getattr(expert_cfg, 'mlp_dim', 4096),
-            action_expert_num_heads=getattr(expert_cfg, 'num_heads', 8 if expert_type == "gemma" else 32),
-            action_expert_num_kv_heads=getattr(expert_cfg, 'num_kv_heads', 1 if expert_type == "gemma" else 8),
-            action_expert_head_dim=getattr(expert_cfg, 'head_dim', 256 if expert_type == "gemma" else 128),
+            action_expert_num_heads=getattr(expert_cfg, 'num_heads', 8),
+            action_expert_num_kv_heads=getattr(expert_cfg, 'num_kv_heads', 1),
+            action_expert_head_dim=getattr(expert_cfg, 'head_dim', 256),
             pi05=pi05,
             precision=getattr(expert_cfg, 'precision', 'bfloat16'),
             num_inference_steps=getattr(action_cfg, 'num_inference_steps', 10),
             noise_beta_alpha=getattr(action_cfg, 'noise_beta_alpha', 1.5),
             noise_beta_beta=getattr(action_cfg, 'noise_beta_beta', 1.0),
-            expert_type=expert_type,
             state_dim=getattr(action_cfg, 'state_dim', None),
         )
 
@@ -557,24 +545,9 @@ class PaliGemmaPi(BaseFramework):
         # Encode prefix
         prefix_embs, prefix_pad_masks, prefix_att_masks = self._prepare_prefix(examples)
 
-        # Check VLM type and framework to determine forward path
         vlm_type = self._detect_vlm_type(self.config)
-        framework_name = self.config.framework.name
 
-        if framework_name == "LlamaPi0" and vlm_type == "llama":
-            # LlamaPi0: Need VLM input embeddings (not full forward output)
-            # because _shared_forward_llama handles layer-by-layer processing
-            prefix_embs_raw, prefix_pad_masks_raw, prefix_att_masks_raw = self._prepare_prefix_generic(examples)
-            vlm_lm = self._get_vlm_language_model()
-            loss = self.flow_matching_head.compute_loss_llama(
-                prefix_embs=prefix_embs_raw,
-                prefix_pad_masks=prefix_pad_masks_raw,
-                prefix_att_masks=prefix_att_masks_raw,
-                vlm_language_model=vlm_lm,
-                state=state,
-                actions=actions,
-            )
-        elif vlm_type == "paligemma":
+        if vlm_type == "paligemma":
             # Traditional joint attention path for PaliGemma
             vlm_lm = self._get_vlm_language_model()
             loss = self.flow_matching_head.compute_loss(
@@ -646,31 +619,9 @@ class PaliGemmaPi(BaseFramework):
             state = torch.stack([torch.tensor(ex["state"], dtype=torch.float32) for ex in examples])
             state = state.to(device)
 
-        # Check VLM type and framework to determine inference path
         vlm_type = self._detect_vlm_type(self.config)
-        framework_name = self.config.framework.name
 
-        if framework_name == "LlamaPi0" and vlm_type == "llama":
-            # LlamaPi0: Llama VLM + Llama Action Expert with joint attention
-            prefix_embs, prefix_pad_masks, prefix_att_masks = self._prepare_prefix_generic(examples)
-            vlm_lm = self._get_vlm_language_model()
-            actions = self.flow_matching_head.sample_actions_llama(
-                prefix_embs=prefix_embs,
-                prefix_pad_masks=prefix_pad_masks,
-                prefix_att_masks=prefix_att_masks,
-                vlm_language_model=vlm_lm,
-                state=state,
-                device=device,
-            )
-
-            # Unnormalize actions if MEAN_STD normalization was used
-            if self.use_action_norm:
-                actions = actions * self.action_std.to(actions.device) + self.action_mean.to(actions.device)
-                actions = self._maybe_remap_gripper(actions)
-
-            actions_np = actions.cpu().float().numpy()
-            return {"normalized_actions": actions_np.tolist()}
-        elif vlm_type != "paligemma":
+        if vlm_type != "paligemma":
             # Use prefix cache mode for non-PaliGemma VLMs
             prefix_embs, prefix_pad_masks, prefix_att_masks = self._prepare_prefix_generic(examples)
             actions = self.flow_matching_head.sample_actions_prefix_cache(

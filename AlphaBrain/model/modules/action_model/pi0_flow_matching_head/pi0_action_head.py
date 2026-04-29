@@ -30,7 +30,6 @@ from .adarms_patch import _gated_residual  # still need the helper function
 from transformers import GemmaForCausalLM
 from transformers.models.auto import CONFIG_MAPPING
 from transformers.models.gemma import modeling_gemma
-from .llama_action_expert import LlamaActionExpert
 
 from .pi0_utils import (
     create_sinusoidal_pos_embedding,
@@ -156,7 +155,6 @@ class Pi0FlowMatchingHead(nn.Module):
         num_inference_steps: int = 10,
         noise_beta_alpha: float = 1.5,
         noise_beta_beta: float = 1.0,
-        expert_type: str = "gemma",  # "gemma" or "llama"
         state_dim: int = None,  # state dimension for π₀ mode state_proj
     ):
         super().__init__()
@@ -167,38 +165,19 @@ class Pi0FlowMatchingHead(nn.Module):
         self.num_inference_steps = num_inference_steps
         self.noise_beta_alpha = noise_beta_alpha
         self.noise_beta_beta = noise_beta_beta
-        self.expert_type = expert_type
 
         expert_width = action_expert_width
 
-        # Action expert (independent Gemma or Llama)
-        if expert_type == "llama":
-            # LlamaPi0: use Llama architecture (π₀ mode only, no adaRMS)
-            if pi05:
-                raise ValueError("LlamaPi0 only supports π₀ mode (pi05=False), not π₀.₅")
-            self.action_expert = LlamaActionExpert(
-                width=action_expert_width,
-                depth=action_expert_depth,
-                mlp_dim=action_expert_mlp_dim,
-                num_heads=action_expert_num_heads,
-                num_kv_heads=action_expert_num_kv_heads,
-                head_dim=action_expert_head_dim,
-                precision=precision,
-            )
-            # For Llama expert, we also store it separately for easier access
-            self.llama_action_expert = self.action_expert
-        else:
-            # Original Gemma expert
-            self.action_expert = GemmaActionExpert(
-                width=action_expert_width,
-                depth=action_expert_depth,
-                mlp_dim=action_expert_mlp_dim,
-                num_heads=action_expert_num_heads,
-                num_kv_heads=action_expert_num_kv_heads,
-                head_dim=action_expert_head_dim,
-                use_adarms=pi05,
-                precision=precision,
-            )
+        self.action_expert = GemmaActionExpert(
+            width=action_expert_width,
+            depth=action_expert_depth,
+            mlp_dim=action_expert_mlp_dim,
+            num_heads=action_expert_num_heads,
+            num_kv_heads=action_expert_num_kv_heads,
+            head_dim=action_expert_head_dim,
+            use_adarms=pi05,
+            precision=precision,
+        )
 
         # Projection layers
         self.action_in_proj = nn.Linear(action_dim, expert_width)
@@ -774,185 +753,3 @@ class Pi0FlowMatchingHead(nn.Module):
             outputs.append(out)
 
         return outputs[1]  # Return suffix output only
-
-    def _shared_forward_llama(
-        self,
-        vlm_language_model: nn.Module,
-        prefix_embs: torch.Tensor,
-        suffix_embs: torch.Tensor,
-        attention_mask: torch.Tensor,
-        position_ids: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        LlamaPi0 forward: concat projected VLM prefix + action suffix,
-        run all tokens through the Llama action expert.
-        
-        Architecture:
-        - VLM has already been fully processed (all 40 layers including vision cross-attention)
-        - VLM output projected from 4096 → 1024 (prefix_embs is already at expert width)
-        - Concat [prefix | suffix] → action expert (18 Llama layers) → extract suffix output
-        
-        This is NOT true layer-wise joint attention (Llama 3.2 Vision has mixed
-        self-attn/cross-attn layers that prevent this). Instead, the action expert
-        does full self-attention over the concatenated sequence, which allows
-        bidirectional information flow between VLM context and action tokens.
-        
-        Args:
-            vlm_language_model: Not used directly (VLM already processed). Kept for API compat.
-            prefix_embs: [B, prefix_len, expert_width] projected VLM hidden states  
-            suffix_embs: [B, suffix_len, expert_width] action expert suffix embeddings
-            attention_mask: [B, 1, full_len, full_len] attention mask
-            position_ids: [B, full_len] position indices
-            
-        Returns:
-            torch.Tensor: [B, suffix_len, expert_width] suffix output
-        """
-        expert_model = self.llama_action_expert.model
-        
-        # Concat prefix + suffix → single sequence through action expert
-        all_embs = torch.cat([prefix_embs, suffix_embs], dim=1)
-        
-        # Run through action expert (standard LlamaModel forward)
-        output = expert_model(
-            inputs_embeds=all_embs,
-            attention_mask=attention_mask,
-            position_ids=position_ids,
-        )
-        
-        hidden_states = output.last_hidden_state
-        
-        # Extract suffix portion
-        suffix_len = suffix_embs.shape[1]
-        suffix_out = hidden_states[:, -suffix_len:]
-        
-        return suffix_out
-
-    def compute_loss_llama(
-        self,
-        prefix_embs: torch.Tensor,
-        prefix_pad_masks: torch.Tensor,
-        prefix_att_masks: torch.Tensor,
-        vlm_language_model: nn.Module,
-        state: Optional[torch.Tensor],
-        actions: torch.Tensor,
-        noise: Optional[torch.Tensor] = None,
-        time: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        """
-        Compute flow matching training loss using Llama joint attention.
-        
-        Similar to compute_loss but uses _shared_forward_llama for joint attention
-        between Llama VLM and Llama action expert.
-        """
-        if noise is None:
-            noise = self.sample_noise(actions.shape, actions.device)
-        if time is None:
-            time = self.sample_time(actions.shape[0], actions.device)
-
-        # Flow matching interpolation
-        time_expanded = time[:, None, None]
-        x_t = time_expanded * noise + (1 - time_expanded) * actions
-        u_t = noise - actions
-
-        # Embed suffix (π₀ mode: no adaRMS conditioning)
-        suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.embed_suffix(state, x_t, time)
-        assert adarms_cond is None, "LlamaPi0 should not use adaRMS conditioning"
-
-        # Cast to match VLM dtype
-        if prefix_embs.dtype == torch.bfloat16:
-            suffix_embs = suffix_embs.to(dtype=torch.bfloat16)
-
-        # Build combined attention masks
-        pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
-        att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
-        att_2d_masks = make_att_2d_masks(pad_masks, att_masks)
-        position_ids = torch.cumsum(pad_masks, dim=1) - 1
-
-        att_2d_masks_4d = att_2d_masks[:, None, :, :].bool()
-        att_2d_masks_4d = torch.where(att_2d_masks_4d, 0.0, -2.3819763e38)
-
-        # Llama joint attention forward
-        suffix_out = self._shared_forward_llama(
-            vlm_language_model,
-            prefix_embs, suffix_embs,
-            att_2d_masks_4d, position_ids,
-        )
-
-        # Project to action space and compute loss
-        suffix_out = suffix_out[:, -self.action_horizon:]
-        suffix_out = suffix_out.float()
-        v_t = self.action_out_proj(suffix_out)
-
-        return F.mse_loss(u_t, v_t, reduction="none")
-
-    @torch.no_grad()
-    def sample_actions_llama(
-        self,
-        prefix_embs: torch.Tensor,
-        prefix_pad_masks: torch.Tensor,
-        prefix_att_masks: torch.Tensor,
-        vlm_language_model: nn.Module,
-        state: Optional[torch.Tensor],
-        device: torch.device,
-        noise: Optional[torch.Tensor] = None,
-        num_steps: Optional[int] = None,
-    ) -> torch.Tensor:
-        """
-        Multi-step denoising inference using Llama joint attention.
-        
-        Note: Uses _shared_forward_llama (no KV cache) to ensure correctness.
-        This matches the Pi0OFT推理bug修复 approach: sacrifice speed for correctness.
-        """
-        num_steps = num_steps or self.num_inference_steps
-        bsize = prefix_pad_masks.shape[0]
-
-        if noise is None:
-            actions_shape = (bsize, self.action_horizon, self.action_dim)
-            noise = self.sample_noise(actions_shape, device)
-
-        # Iterative denoising (no KV cache for simplicity and correctness)
-        dt = -1.0 / num_steps
-        dt = torch.tensor(dt, dtype=torch.float32, device=device)
-        x_t = noise  # keep float32
-        time = torch.tensor(1.0, dtype=torch.float32, device=device)
-
-        while time >= -dt / 2:
-            expanded_time = time.expand(bsize)
-
-            # Embed suffix
-            suffix_embs, suffix_pad_masks, suffix_att_masks, adarms_cond = self.embed_suffix(
-                state, x_t, expanded_time
-            )
-            assert adarms_cond is None, "LlamaPi0 should not use adaRMS conditioning"
-
-            # Cast to match prefix dtype
-            if prefix_embs.dtype == torch.bfloat16:
-                suffix_embs = suffix_embs.to(dtype=torch.bfloat16)
-
-            # Build attention masks
-            pad_masks = torch.cat([prefix_pad_masks, suffix_pad_masks], dim=1)
-            att_masks = torch.cat([prefix_att_masks, suffix_att_masks], dim=1)
-            att_2d_masks = make_att_2d_masks(pad_masks, att_masks)
-            position_ids = torch.cumsum(pad_masks, dim=1) - 1
-
-            att_2d_masks_4d = att_2d_masks[:, None, :, :].bool()
-            att_2d_masks_4d = torch.where(att_2d_masks_4d, 0.0, -2.3819763e38)
-
-            # Llama joint attention forward
-            suffix_out = self._shared_forward_llama(
-                vlm_language_model,
-                prefix_embs, suffix_embs,
-                att_2d_masks_4d, position_ids,
-            )
-
-            # Extract action tokens and project
-            suffix_out = suffix_out[:, -self.action_horizon:]
-            suffix_out = suffix_out.to(dtype=torch.float32)
-            v_t = self.action_out_proj(suffix_out)
-
-            # Update x_t
-            x_t = x_t + dt * v_t
-            time = time + dt
-
-        return x_t
-
