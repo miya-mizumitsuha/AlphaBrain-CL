@@ -188,8 +188,7 @@ bash scripts/run_continual_learning_scripts/run_cl_train.sh \
 # 2. Eval (50 trials × 10 tasks; final ckpt only)
 bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
     --run-id qwengr00t_mir_libero_goal_v1 \
-    --base-config configs/continual_learning/cl_base.yaml \
-    --base-config configs/continual_learning/models/qwengr00t.yaml \
+    --model qwengr00t \
     --gpus 0,1 --trials 50 --last-only
 ```
 
@@ -270,11 +269,9 @@ task.
 
 ```bash
 # LIBERO — final ckpt × 50 trials per task
-# Repeat --base-config for each yaml: cl_base.yaml then the model overlay
 bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
     --run-id qwengr00t_mir_libero_goal_v1 \
-    --base-config configs/continual_learning/cl_base.yaml \
-    --base-config configs/continual_learning/models/qwengr00t.yaml \
+    --model qwengr00t \
     --gpus 0,1 --trials 50 --last-only
 ```
 
@@ -398,7 +395,7 @@ bash scripts/run_continual_learning_scripts/run_cl_train.sh \
 | Flag                  | Description                                                                  | Default       |
 |:----------------------|:-----------------------------------------------------------------------------|:--------------|
 | `--run-id ID`         | **Required.** Run directory under `results/Checkpoints/`.                    | —             |
-| `--base-config PATH`  | **Required for LoRA runs** — base yaml used to merge the adapter.            | —             |
+| `--model NAME`        | **Required for LoRA runs** — model name (`qwengr00t`, `neurovla`, `llamaoft`, `paligemma`). Auto-expands to `cl_base.yaml + models/<name>.yaml`. | — |
 | `--gpus LIST`         | Comma-separated GPU id list; determines parallelism.                         | `0`           |
 | `--suite NAME`        | `libero_goal`, `libero_spatial`, `libero_object`, or `libero_10`.            | `libero_goal` |
 | `--trials N`          | Rollouts per task (production = 50).                                         | `10`          |
