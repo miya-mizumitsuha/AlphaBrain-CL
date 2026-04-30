@@ -51,13 +51,11 @@ Common:
                          qwengr00t_ewc_lora_libero.yaml            (LoRA + EWC)
                        LIBERO-Long (libero_10):
                          qwengr00t_er_lora_libero_long.yaml         (LoRA + ER)
-                         qwengr00t_mir_lora_libero_long_refresh50.yaml  (LoRA + MIR — 77% recipe ported to long)
+                         qwengr00t_mir_lora_libero_long_refresh50.yaml  (LoRA + MIR — 30% recipe)
                        Other backbones (LIBERO-Goal):
                          neurovla_er_lora_libero.yaml              (NeuroVLA  + LoRA + ER)
                          llamaoft_er_lora_libero.yaml              (LlamaOFT  + LoRA + ER)
                          paligemma_oft_er_libero.yaml              (PaliGemmaOFT Full-param + ER)
-                       Smoke configs (pipeline check, not convergence):
-                         qwengr00t_er_lora_test.yaml / qwengr00t_mir_lora_test.yaml / qwengr00t_ewc_lora_test.yaml
   --run-id ID        Override run_id in yaml (checkpoint dir name)
   --gpus SPEC        Either a count ("2") or a GPU-id list ("1,2,3"). A list
                      pins CUDA_VISIBLE_DEVICES to those IDs. (default: auto-detect)

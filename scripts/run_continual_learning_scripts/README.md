@@ -36,10 +36,10 @@ Four VLA architectures are supported, each with full-parameter and
 
 Selectable via `continual_learning.algorithm.name` in YAML.
 
-| Algorithm | Category          | One-line idea                                                          |
-|:----------|:------------------|:-----------------------------------------------------------------------|
-| **ER**    | rehearsal_based   | Reservoir replay buffer; mixes past-task samples into each batch        |
-| **MIR**   | rehearsal_based   | Replays the top-k samples that a virtual SGD step would hurt the most   |
+| Algorithm | Category        | One-line idea                                                         |
+|:----------|:----------------|:----------------------------------------------------------------------|
+| **ER**    | rehearsal_based | Reservoir replay buffer; mixes past-task samples into each batch       |
+| **MIR**   | rehearsal_based | Replays the top-k samples that a virtual SGD step would hurt the most  |
 
 All algorithms share the single :class:`CLAlgorithm` hook interface
 (`observe`, `modify_batch`, `compute_penalty`, `after_backward`,
@@ -222,9 +222,10 @@ bash scripts/run_continual_learning_scripts/run_cl_train.sh
 # Smoke test — 5 steps × 10 tasks, ~3 min (pipeline check, not convergence)
 bash scripts/run_continual_learning_scripts/run_cl_train.sh --smoke
 
-# Switch CL method via yaml
-bash scripts/run_continual_learning_scripts/run_cl_train.sh --smoke \
-    --yaml configs/continual_learning/qwengr00t_mir_lora_test.yaml
+# MIR 77% LIBERO-Goal recipe
+bash scripts/run_continual_learning_scripts/run_cl_train.sh \
+    --yaml configs/continual_learning/qwengr00t_mir_lora_libero_refresh50.yaml \
+    --gpus 0,1,2,3
 
 # NeuroVLA full-parameter + ER
 bash scripts/run_continual_learning_scripts/run_cl_train.sh \
@@ -253,8 +254,8 @@ task.
 ```bash
 # LIBERO — final ckpt × 50 trials per task
 bash scripts/run_continual_learning_scripts/run_cl_eval.sh \
-    --run-id qwengr00t_mir_lora_libero_goal_v1 \
-    --base-config configs/continual_learning/qwengr00t_mir_lora_libero.yaml \
+    --run-id qwengr00t_mir_lora_libero_goal_refresh50_v1 \
+    --base-config configs/continual_learning/qwengr00t_mir_lora_libero_refresh50.yaml \
     --gpus 0,1 --trials 50 --last-only
 ```
 
@@ -348,11 +349,9 @@ custom streams beyond LIBERO.
 |:----------------------------------------------|:-------------|:----------------|:-----|:-------------------|
 | `qwengr00t_er_lora_libero.yaml` (default)         | QwenGR00T    | LoRA (r=32)     | ER   | LIBERO-Goal        |
 | `qwengr00t_er_lora_libero_long.yaml`              | QwenGR00T    | LoRA            | ER   | LIBERO-Long (10)   |
-| `qwengr00t_mir_lora_libero.yaml`                  | QwenGR00T    | LoRA            | MIR  | LIBERO-Goal        |
 | `qwengr00t_mir_lora_libero_refresh50.yaml`        | QwenGR00T    | LoRA            | MIR  | LIBERO-Goal (77%)  |
 | `qwengr00t_mir_lora_libero_long_refresh50.yaml`   | QwenGR00T    | LoRA            | MIR  | LIBERO-Long (30%)  |
 | `qwengr00t_er_libero.yaml`                        | QwenGR00T    | Full-parameter  | ER   | LIBERO-Goal        |
-| `qwengr00t_ewc_lora_libero.yaml`                  | QwenGR00T    | LoRA            | EWC  | LIBERO-Goal        |
 | `neurovla_er_lora_libero.yaml`                    | NeuroVLA     | LoRA            | ER   | LIBERO-Goal        |
 | `llamaoft_er_lora_libero.yaml`                    | LlamaOFT     | LoRA (r=16)     | ER   | LIBERO-Goal        |
 | `paligemma_oft_er_libero.yaml`                    | PaliGemmaOFT | Full-parameter  | ER   | LIBERO-Goal        |
@@ -366,7 +365,7 @@ steps.  See [Reproduce the 77 % MIR recipe](#reproduce-the-77--mir-recipe-libero
 ```yaml
 continual_learning:
   algorithm:
-    name: er          # er | mir | ewc
+    name: er          # er | mir
     # method-specific knobs — see per-algorithm sections above
 ```
 

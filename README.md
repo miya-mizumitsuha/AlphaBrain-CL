@@ -68,7 +68,7 @@ AlphaBrain delivers five core capabilities on a single stack: the **VLA framewor
 | **OFT** | MLP action head, parallel continuous decoding | Fast prototyping, baseline alignment |
 | **GR00T** | System1 + Flow-Matching DiT System2 | High-precision manipulation, long-horizon planning |
 | **PI** | Flow-Matching action prediction | Diffusion-style policies |
-| **ACT** | Action Chunking Transformer | Behavior cloning baseline |
+| **LoRA Adapter** | Rank-32 adapters on all-linear layers, applied to all supported frameworks | Parameter-efficient fine-tuning |
 | **NeuroVLA** | Bio-inspired spiking + STDP | Brain-inspired control |
 | **CosmosPolicy** | Latent-space video diffusion | World-model-native policy |
 
