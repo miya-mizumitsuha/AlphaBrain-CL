@@ -8,7 +8,7 @@
 #   accelerate launch ... train.py \
 #       --config_yaml configs/continual_learning/cl_base.yaml \
 #                     configs/continual_learning/models/qwengr00t.yaml \
-#       --run_id my_run_v1
+#       --run_id qwengr00t_er_libero_goal
 #
 # In practice, use run_cl_train.sh which handles composition automatically:
 #
